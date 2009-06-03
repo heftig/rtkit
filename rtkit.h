@@ -38,15 +38,17 @@
 #define RTKIT_OBJECT_PATH "/org/freedesktop/RealtimeKit1"
 
 /* This is mostly equivalent to sched_setparam(thread, SCHED_RR, {
- * .sched_priority = priority }). If thread is 0 the calling
- * processe's main thread is used. The returned value is a negative
- * errno error code, or 0 on success. */
+ * .sched_priority = priority }). 'thread' needs to be a kernel thread
+ * id as returned by gettid(), not a pthread_t! If 'thread' is 0 the
+ * current thread is used. The returned value is a negative errno
+ * style error code, or 0 on success. */
 int rtkit_make_realtime(DBusConnection *connection, pid_t thread, int priority);
 
 /* This is mostly equivalent to setpriority(PRIO_PROCESS, thread,
- * nice_level). If thread is 0 the calling processe's main thread is
- * used. The returned value is a negative errno error code, or 0 on
- * success.*/
+ * nice_level). 'thread' needs to be a kernel thread id as returned by
+ * gettid(), not a pthread_t! If 'thread' is 0 the current thread is
+ * used. The returned value is a negative errno style error code, or 0
+ * on success.*/
 int rtkit_make_high_priority(DBusConnection *connection, pid_t thread, int nice_level);
 
 #endif

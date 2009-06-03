@@ -24,10 +24,19 @@
   SOFTWARE.
 ***/
 
+#define _GNU_SOURCE
+
 #include <string.h>
 #include <errno.h>
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/syscall.h>
 
 #include "rtkit.h"
+
+static pid_t _gettid(void) {
+        return syscall(SYS_gettid);
+}
 
 static int translate_error(const char *name) {
         if (strcmp(name, DBUS_ERROR_NO_MEMORY) == 0)
@@ -50,6 +59,9 @@ int rtkit_make_realtime(DBusConnection *connection, pid_t thread, int priority) 
         int ret;
 
         dbus_error_init(&error);
+
+        if (thread == 0)
+                thread = _gettid();
 
         if (!(m = dbus_message_new_method_call(
                               RTKIT_SERVICE_NAME,
@@ -104,6 +116,9 @@ int rtkit_make_high_priority(DBusConnection *connection, pid_t thread, int nice_
         int ret;
 
         dbus_error_init(&error);
+
+        if (thread == 0)
+                thread = _gettid();
 
         if (!(m = dbus_message_new_method_call(
                               RTKIT_SERVICE_NAME,

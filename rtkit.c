@@ -24,15 +24,19 @@
   SOFTWARE.
 ***/
 
+#include <errno.h>
+
+#include "rtkit.h"
+
+#ifdef __linux__
+
 #define _GNU_SOURCE
 
 #include <string.h>
-#include <errno.h>
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/syscall.h>
 
-#include "rtkit.h"
 
 static pid_t _gettid(void) {
         return syscall(SYS_gettid);
@@ -166,3 +170,15 @@ finish:
 
         return ret;
 }
+
+#else
+
+int rtkit_make_realtime(DBusConnection *connection, pid_t thread, int priority) {
+        return -ENOTSUP;
+}
+
+int rtkit_make_high_priority(DBusConnection *connection, pid_t thread, int nice_level) {
+        return -ENOTSUP;
+}
+
+#endif

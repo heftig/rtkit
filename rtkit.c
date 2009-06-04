@@ -37,9 +37,8 @@
 #include <sys/types.h>
 #include <sys/syscall.h>
 
-
 static pid_t _gettid(void) {
-        return syscall(SYS_gettid);
+        return (pid_t) syscall(SYS_gettid);
 }
 
 static int translate_error(const char *name) {

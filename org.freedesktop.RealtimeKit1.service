@@ -1,0 +1,4 @@
+[D-BUS Service]
+Name=org.freedesktop.RealtimeKit1
+Exec=/home/lennart/projects/rtkit/rtkit-daemon
+User=root

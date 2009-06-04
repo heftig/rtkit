@@ -42,13 +42,13 @@
  * id as returned by gettid(), not a pthread_t! If 'thread' is 0 the
  * current thread is used. The returned value is a negative errno
  * style error code, or 0 on success. */
-int rtkit_make_realtime(DBusConnection *connection, pid_t thread, int priority);
+int rtkit_make_realtime(DBusConnection *system_bus, pid_t thread, int priority);
 
 /* This is mostly equivalent to setpriority(PRIO_PROCESS, thread,
  * nice_level). 'thread' needs to be a kernel thread id as returned by
  * gettid(), not a pthread_t! If 'thread' is 0 the current thread is
  * used. The returned value is a negative errno style error code, or 0
  * on success.*/
-int rtkit_make_high_priority(DBusConnection *connection, pid_t thread, int nice_level);
+int rtkit_make_high_priority(DBusConnection *system_bus, pid_t thread, int nice_level);
 
 #endif

@@ -500,6 +500,20 @@ fail:
         return r;
 }
 
+static const char *translate_error(int error) {
+        switch (error) {
+                case -EPERM:
+                case -EACCES:
+                        return DBUS_ERROR_ACCESS_DENIED;
+
+                case -ENOMEM:
+                        return DBUS_ERROR_NO_MEMORY;
+
+                default:
+                        return DBUS_ERROR_FAILED;
+        }
+}
+
 static DBusHandlerResult dbus_handler(DBusConnection *c, DBusMessage *m, void *userdata) {
         DBusError error;
         DBusMessage *r = NULL;
@@ -525,12 +539,12 @@ static DBusHandlerResult dbus_handler(DBusConnection *c, DBusMessage *m, void *u
                 }
 
                 if ((ret = process_fill(&p, c, m)) < 0) {
-                        assert_se(r = dbus_message_new_error_printf(m, DBUS_ERROR_FAILED, strerror(-ret)));
+                        assert_se(r = dbus_message_new_error_printf(m, translate_error(ret), strerror(-ret)));
                         goto finish;
                 }
 
                 if ((ret = process_set_realtime(&p, (pid_t) thread, priority))) {
-                        assert_se(r = dbus_message_new_error_printf(m, DBUS_ERROR_FAILED, strerror(-ret)));
+                        assert_se(r = dbus_message_new_error_printf(m, translate_error(ret), strerror(-ret)));
                         goto finish;
                 }
 
@@ -555,12 +569,12 @@ static DBusHandlerResult dbus_handler(DBusConnection *c, DBusMessage *m, void *u
                 }
 
                 if ((ret = process_fill(&p, c, m)) < 0) {
-                        assert_se(r = dbus_message_new_error_printf(m, DBUS_ERROR_FAILED, strerror(-ret)));
+                        assert_se(r = dbus_message_new_error_printf(m, translate_error(ret), strerror(-ret)));
                         goto finish;
                 }
 
                 if ((ret = process_set_high_priority(&p, (pid_t) thread, priority))) {
-                        assert_se(r = dbus_message_new_error_printf(m, DBUS_ERROR_FAILED, strerror(-ret)));
+                        assert_se(r = dbus_message_new_error_printf(m, translate_error(ret), strerror(-ret)));
                         goto finish;
                 }
 

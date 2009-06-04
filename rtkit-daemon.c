@@ -67,6 +67,8 @@
         "   <arg name=\"thread\" type=\"t\" direction=\"in\"/>"         \
         "   <arg name=\"priority\" type=\"i\" direction=\"in\"/>"       \
         "  </method>"                                                   \
+        "  <method name=\"ResetAll\"/>"                                 \
+        "  <method name=\"Exit\"/>"                                     \
         " </interface>"                                                 \
         " <interface name=\"org.freedesktop.DBus.Introspectable\">"     \
         "  <method name=\"Introspect\">"                                \
@@ -793,6 +795,20 @@ finish:
         return r;
 }
 
+static void reset_all(void) {
+        struct user *u;
+        struct process *p;
+        struct thread *t;
+
+        for (u = users; u; u = u->next)
+                for (p = u->processes; p; p = p->next)
+                        for (t = p->threads; t; t = t->next)
+                                if (verify_process_user(u, p) < 0 ||
+                                    verify_process_starttime(p) < 0 ||
+                                    verify_thread_starttime(p, t) < 0)
+                                        thread_reset(t);
+}
+
 /* This mimics dbus_bus_get_unix_user() */
 static unsigned long get_unix_process_id(
                 DBusConnection *connection,
@@ -990,6 +1006,21 @@ static DBusHandlerResult dbus_handler(DBusConnection *c, DBusMessage *m, void *u
 
                 assert_se(r = dbus_message_new_method_return(m));
 
+        } else if (dbus_message_is_method_call(m, "org.freedesktop.RealtimeKit1", "ResetAll")) {
+
+                reset_all();
+                user_gc();
+                assert_se(r = dbus_message_new_method_return(m));
+
+        } else if (dbus_message_is_method_call(m, "org.freedesktop.RealtimeKit1", "Exit")) {
+
+                assert_se(r = dbus_message_new_method_return(m));
+                assert_se(dbus_connection_send(c, r, NULL));
+                dbus_message_unref(r);
+                r = NULL;
+
+                dbus_connection_close(c);
+
         } else if (dbus_message_is_method_call(m, "org.freedesktop.DBus.Introspectable", "Introspect")) {
                 const char *xml = INTROSPECT_XML;
 
@@ -1027,7 +1058,7 @@ static int setup_dbus(DBusConnection **c) {
 
         dbus_error_init(&error);
 
-        if (!(*c = dbus_bus_get(DBUS_BUS_SYSTEM, &error))) {
+        if (!(*c = dbus_bus_get_private(DBUS_BUS_SYSTEM, &error))) {
                 fprintf(stderr, "Failed to connect to system bus: %s\n", error.message);
                 goto fail;
         }
@@ -1105,6 +1136,8 @@ static int drop_priviliges(void) {
                 return r;
         }
 
+        assert_se(cap_free(caps) == 0);
+
         /* Seventh, update environment */
         setenv("USER", USERNAME, 1);
         setenv("USERNAME", USERNAME, 1);
@@ -1165,6 +1198,11 @@ int main(int argc, char *argv[]) {
         int ret = 1;
         struct user *u;
 
+        if (getuid() != 0) {
+                fprintf(stderr, "Need to be run as root.\n");
+                goto finish;
+        }
+
         self_drop_realtime();
 
         if (setup_dbus(&bus) < 0)
@@ -1180,20 +1218,31 @@ int main(int argc, char *argv[]) {
 
         fprintf(stderr, "Running.\n");
 
+        dbus_connection_set_exit_on_disconnect(bus, FALSE);
+
         while (dbus_connection_read_write_dispatch(bus, -1))
                 ;
 
         ret = 0;
 
+        fprintf(stderr, "Exiting cleanly.\n");
+
 finish:
 
-        if (bus)
+        if (bus) {
+                if (dbus_connection_get_is_connected(bus))
+                        dbus_connection_close(bus);
                 dbus_connection_unref(bus);
+        }
+
+        reset_all();
 
         while ((u = users)) {
                 users = u->next;
                 free_user(u);
         }
+
+        dbus_shutdown();
 
         return ret;
 }

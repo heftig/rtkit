@@ -36,13 +36,6 @@
 #define RLIMIT_RTTIME 15
 #endif
 
-#define OUR_RR_PRIORITY 30
-#define OUR_NICE_LEVEL 1
-
-#define USERNAME "rtkit"
-
-#define RTKIT_RTTIME_MAX_NS 200000000ULL /* 200 ms */
-
 #define INTROSPECT_XML                                                  \
         DBUS_INTROSPECT_1_0_XML_DOCTYPE_DECL_NODE                       \
         "<node>"                                                        \
@@ -74,12 +67,32 @@
 
 #define ELEMENTSOF(x) (sizeof(x)/sizeof(x[0]))
 
-#define PROCESSES_PER_USER_MAX 15
-#define THREADS_PER_USER_MAX 25
+/* If we actually execute a request we temporarily upgrade our realtime priority to this level */
+#define OUR_RR_PRIORITY 30
+
+/* Normally we run at this nice level */
+#define OUR_NICE_LEVEL 1
+
+/* Username we shall run under */
+#define USERNAME "rtkit"
+
+/* Enforce that clients have RLIMIT_RTTIME set to a value <= this */
+#define RTKIT_RTTIME_MAX_NS 200000000ULL /* 200 ms */
+
+/* How many users do we supervise at max? */
 #define USERS_MAX 2048
 
+/* How many processes of a single user do we supervise at max? */
+#define PROCESSES_PER_USER_MAX 15
+
+/* How many threads of a single user do we supervise at max? */
+#define THREADS_PER_USER_MAX 25
+
+/* Refuse further requests if one user issues more than ACTIONS_PER_BURST_MAX in this time */
 #define ACTIONS_BURST_SEC (20)
-#define ACTIONS_PER_BURST THREADS_PER_USER_MAX
+
+/* Refuse further requests if one user issues more than this many in ACTIONS_BURST_SEC time */
+#define ACTIONS_PER_BURST_MAX THREADS_PER_USER_MAX
 
 struct thread {
         /* We use the thread id plus its starttime as a unique identifier for threads */
@@ -229,7 +242,7 @@ static bool verify_burst(struct user *u) {
                 return true;
         }
 
-        if (u->n_actions >= ACTIONS_PER_BURST) {
+        if (u->n_actions >= ACTIONS_PER_BURST_MAX) {
                 char user[64];
                 fprintf(stderr, "Warning: Reached burst limit for user '%s', denying request.\n", get_user_name(u->uid, user, sizeof(user)));
                 return false;

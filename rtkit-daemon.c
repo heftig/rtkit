@@ -113,6 +113,8 @@ struct user {
 
 static struct user *users = NULL;
 static unsigned n_users = 0;
+static unsigned n_total_processes = 0;
+static unsigned n_total_threads = 0;
 static const char *proc = NULL;
 
 static const char *get_proc_path(void) {
@@ -291,6 +293,7 @@ static int find_process(struct process** _p, struct user *u, pid_t pid, unsigned
         p->next = u->processes;
         u->processes = p;
         u->n_processes++;
+        n_total_processes++;
 
         *_p = p;
         return 0;
@@ -319,6 +322,7 @@ static int find_thread(struct thread** _t, struct user *u, struct process *p, pi
         t->next = p->threads;
         p->threads = t;
         u->n_threads++;
+        n_total_threads++;
 
         *_t = t;
         return 0;
@@ -394,8 +398,12 @@ static void thread_gc(struct user *u, struct process *p) {
                                 l->next = n;
                         else
                                 p->threads = n;
+
                         assert(u->n_threads >= 1);
                         u->n_threads--;
+
+                        assert(n_total_threads >= 1);
+                        n_total_threads--;
                 } else
                         l = t;
         }
@@ -421,6 +429,9 @@ static void process_gc(struct user *u) {
 
                         assert(u->n_processes >= 1);
                         u->n_processes--;
+
+                        assert(n_total_processes >= 1);
+                        n_total_processes--;
                 } else
                         l = p;
         }
@@ -957,6 +968,11 @@ static DBusHandlerResult dbus_handler(DBusConnection *c, DBusMessage *m, void *u
                                           DBUS_TYPE_INVALID));
         } else
                 return DBUS_HANDLER_RESULT_NOT_YET_HANDLED;
+
+        fprintf(stderr, "Supervising %u threads of %u processes of %u users.\n",
+                n_total_threads,
+                n_total_processes,
+                n_users);
 
 finish:
 

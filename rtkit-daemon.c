@@ -113,6 +113,16 @@ struct user {
 
 static struct user *users = NULL;
 static unsigned n_users = 0;
+static const char *proc = NULL;
+
+static const char *get_proc_path(void) {
+        /* Useful for chroot environments */
+
+        if (proc)
+                return proc;
+
+        return "/proc";
+}
 
 static char* get_user_name(uid_t uid, char *user, size_t len) {
         struct passwd *pw;
@@ -134,9 +144,9 @@ static int read_starttime(pid_t pid, pid_t tid, unsigned long long *st) {
         FILE *f;
 
         if (tid != 0)
-                assert_se(snprintf(fn, sizeof(fn)-1, "/proc/%llu/task/%llu/stat", (unsigned long long) pid, (unsigned long long) tid) < (int) (sizeof(fn)-1));
+                assert_se(snprintf(fn, sizeof(fn)-1, "%s/%llu/task/%llu/stat", get_proc_path(), (unsigned long long) pid, (unsigned long long) tid) < (int) (sizeof(fn)-1));
         else
-                assert_se(snprintf(fn, sizeof(fn)-1, "/proc/%llu/stat", (unsigned long long) pid) < (int) (sizeof(fn)-1));
+                assert_se(snprintf(fn, sizeof(fn)-1, "%s/%llu/stat", get_proc_path(), (unsigned long long) pid) < (int) (sizeof(fn)-1));
         fn[sizeof(fn)-1] = 0;
 
         if (!(f = fopen(fn, "r"))) {
@@ -478,15 +488,14 @@ static void self_drop_realtime(void) {
                 fprintf(stderr, "Warning: Failed to reset nice level to %u: %s\n", OUR_NICE_LEVEL, strerror(errno));
 }
 
+/* Verifies that RLIMIT_RTTIME is set for the specified process */
 static int verify_process_rttime(struct process *p) {
         char fn[128];
         FILE *f;
         int r;
         bool good = false;
 
-        /* Verifies that RLIMIT_RTTIME is set for the specified process */
-
-        assert_se(snprintf(fn, sizeof(fn)-1, "/proc/%llu/limits", (unsigned long long) p->pid) < (int) (sizeof(fn)-1));
+        assert_se(snprintf(fn, sizeof(fn)-1, "%s/%llu/limits", get_proc_path(), (unsigned long long) p->pid) < (int) (sizeof(fn)-1));
         fn[sizeof(fn)-1] = 0;
 
         if (!(f = fopen(fn, "r"))) {
@@ -534,7 +543,7 @@ static int verify_process_user(struct user *u, struct process *p) {
         int r;
         struct stat st;
 
-        assert_se(snprintf(fn, sizeof(fn)-1, "/proc/%llu", (unsigned long long) p->pid) < (int) (sizeof(fn)-1));
+        assert_se(snprintf(fn, sizeof(fn)-1, "%s/%llu", get_proc_path(), (unsigned long long) p->pid) < (int) (sizeof(fn)-1));
         fn[sizeof(fn)-1] = 0;
 
         memset(&st, 0, sizeof(st));
@@ -599,7 +608,7 @@ static char* get_exe_name(pid_t pid, char *exe, size_t len) {
         char fn[128];
         ssize_t n;
 
-        assert_se(snprintf(fn, sizeof(fn)-1, "/proc/%llu/exe", (unsigned long long) pid) < (int) (sizeof(fn)-1));
+        assert_se(snprintf(fn, sizeof(fn)-1, "%s/%llu/exe", get_proc_path(), (unsigned long long) pid) < (int) (sizeof(fn)-1));
         fn[sizeof(fn)-1] = 0;
 
         if ((n = readlink(fn, exe, len-1)) < 0) {
@@ -999,19 +1008,29 @@ static int drop_priviliges(void) {
                 CAP_SYS_PTRACE            /* Needed so that we can read /proc/$$/exe. Linux is weird. */
         };
 
+        /* First, get user data */
         if (!(pw = getpwnam(USERNAME))) {
                 fprintf(stderr, "Failed to find user '%s'.\n", USERNAME);
                 return -ENOENT;
         }
 
-        /* First, say that we want to keep caps */
+        /* Second, chroot() */
+        if (chroot("/proc") < 0 ||
+            chdir("/") < 0) {
+                r = -errno;
+                fprintf(stderr, "Failed to chroot() to /proc: %s\n", strerror(errno));
+                return r;
+        }
+        proc = "/";
+
+        /* Third, say that we want to keep caps */
         if (prctl(PR_SET_KEEPCAPS, 1) < 0) {
                 r = -errno;
                 fprintf(stderr, "PR_SET_KEEPCAPS failed: %s\n", strerror(errno));
                 return r;
         }
 
-        /* Second, drop privs */
+        /* Fourth, drop privs */
         if (setresgid(pw->pw_gid, pw->pw_gid, pw->pw_gid) < 0 ||
             setresuid(pw->pw_uid, pw->pw_uid, pw->pw_uid) < 0) {
                 r = -errno;
@@ -1019,14 +1038,14 @@ static int drop_priviliges(void) {
                 return r;
         }
 
-        /* Third, reset caps flag */
+        /* Fifth, reset caps flag */
         if (prctl(PR_SET_KEEPCAPS, 0) < 0) {
                 r = -errno;
                 fprintf(stderr, "PR_SET_KEEPCAPS failed: %s\n", strerror(errno));
                 return r;
         }
 
-        /* Fourth, reduce caps */
+        /* Sixth, reduce caps */
         assert_se(caps = cap_init());
         assert_se(cap_clear(caps) == 0);
         assert_se(cap_set_flag(caps, CAP_EFFECTIVE, ELEMENTSOF(cap_values), cap_values, CAP_SET) == 0);
@@ -1038,11 +1057,11 @@ static int drop_priviliges(void) {
                 return r;
         }
 
-        /* Fifth, update environment */
+        /* Seventh, update environment */
         setenv("USER", USERNAME, 1);
         setenv("USERNAME", USERNAME, 1);
         setenv("LOGNAME", USERNAME, 1);
-        setenv("HOME", pw->pw_dir, 1);
+        setenv("HOME", get_proc_path(), 1);
 
         fprintf(stderr, "Sucessfully dropped priviliges.\n");
 
@@ -1100,21 +1119,20 @@ int main(int argc, char *argv[]) {
 
         self_drop_realtime();
 
+        if (setup_dbus(&bus) < 0)
+                goto finish;
+
         if (drop_priviliges() < 0)
                 goto finish;
 
         if (set_resource_limits() < 0)
                 goto finish;
 
-        assert_se(chdir("/") == 0);
         umask(0777);
-
-        if (setup_dbus(&bus) < 0)
-                goto finish;
 
         fprintf(stderr, "Running.\n");
 
-        while (!dbus_connection_read_write_dispatch(bus, -1))
+        while (dbus_connection_read_write_dispatch(bus, -1))
                 ;
 
         ret = 0;

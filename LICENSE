@@ -1,0 +1,9 @@
+LICENSES
+
+	The daemon itself is GPL3 licensed, for more information see the GPL
+	file.
+
+	The client library is BSD licensed, for more information see the
+	headers of the appropriate files.
+
+Lennart Poettering, 2009

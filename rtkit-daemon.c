@@ -122,8 +122,8 @@ static unsigned actions_burst_sec = 20;
 /* Refuse further requests if one user issues more than this many in ACTIONS_BURST_SEC time */
 static unsigned actions_per_burst_max = 25;
 
-/* Drop priviliges */
-static bool do_drop_priviliges = TRUE;
+/* Drop privileges */
+static bool do_drop_privileges = TRUE;
 
 /* Change root directory to /proc */
 static bool do_chroot = TRUE;
@@ -1097,11 +1097,11 @@ fail:
         return -EIO;
 }
 
-static int drop_priviliges(void) {
+static int drop_privileges(void) {
         struct passwd *pw = NULL;
         int r;
 
-        if (do_drop_priviliges) {
+        if (do_drop_privileges) {
 
                 /* First, get user data */
                 if (!(pw = getpwnam(username))) {
@@ -1124,7 +1124,7 @@ static int drop_priviliges(void) {
                 fprintf(stderr, "Sucessfully called chroot.\n");
         }
 
-        if (do_drop_priviliges) {
+        if (do_drop_privileges) {
                 cap_t caps;
                 const cap_value_t cap_values[] = {
                         CAP_SYS_NICE,             /* Needed for obvious reasons */
@@ -1174,7 +1174,7 @@ static int drop_priviliges(void) {
                 setenv("LOGNAME", username, 1);
                 setenv("HOME", get_proc_path(), 1);
 
-                fprintf(stderr, "Sucessfully dropped priviliges.\n");
+                fprintf(stderr, "Sucessfully dropped privileges.\n");
         }
 
         return 0;
@@ -1246,7 +1246,7 @@ enum {
         ARG_THREADS_PER_USER_MAX,
         ARG_ACTIONS_BURST_SEC,
         ARG_ACTIONS_PER_BURST_MAX,
-        ARG_NO_DROP_PRIVILIGES,
+        ARG_NO_DROP_PRIVILEGES,
         ARG_NO_CHROOT,
         ARG_NO_LIMIT_RESOURCES,
 };
@@ -1266,7 +1266,7 @@ static const struct option long_options[] = {
     { "threads-per-user-max",        required_argument, 0, ARG_THREADS_PER_USER_MAX },
     { "actions-burst-sec",           required_argument, 0, ARG_ACTIONS_BURST_SEC },
     { "actions-per-burst-max",       required_argument, 0, ARG_ACTIONS_PER_BURST_MAX },
-    { "no-drop-priviliges",          no_argument,       0, ARG_NO_DROP_PRIVILIGES },
+    { "no-drop-privileges",          no_argument,       0, ARG_NO_DROP_PRIVILEGES },
     { "no-chroot",                   no_argument,       0, ARG_NO_CHROOT },
     { "no-limit-resources",          no_argument,       0, ARG_NO_LIMIT_RESOURCES },
     { NULL, 0, 0, 0}
@@ -1303,7 +1303,7 @@ static void show_help(const char *exe) {
                "                                      at max per user at the same time (%u)\n"
                "      --actions-burst-sec=SEC         Enforce requests limits in this time (%u)\n"
                "      --actions-per-burst-max=INT     Allow this many requests per burst (%u)\n"
-               "      --no-drop-priviliges            Don't drop priviliges\n"
+               "      --no-drop-privileges            Don't drop privileges\n"
                "      --no-chroot                     Don't chroot\n"
                "      --no-limit-resources            Don't limit daemon's resources\n",
                exe,
@@ -1480,8 +1480,8 @@ static int parse_command_line(int argc, char *argv[], int *ret) {
                                 break;
                         }
 
-                        case ARG_NO_DROP_PRIVILIGES:
-                                do_drop_priviliges = FALSE;
+                        case ARG_NO_DROP_PRIVILEGES:
+                                do_drop_privileges = FALSE;
                                 break;
 
                         case ARG_NO_CHROOT:
@@ -1532,7 +1532,7 @@ int main(int argc, char *argv[]) {
         if (setup_dbus(&bus) < 0)
                 goto finish;
 
-        if (drop_priviliges() < 0)
+        if (drop_privileges() < 0)
                 goto finish;
 
         if (set_resource_limits() < 0)

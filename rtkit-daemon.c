@@ -803,9 +803,9 @@ static void reset_all(void) {
         for (u = users; u; u = u->next)
                 for (p = u->processes; p; p = p->next)
                         for (t = p->threads; t; t = t->next)
-                                if (verify_process_user(u, p) < 0 ||
-                                    verify_process_starttime(p) < 0 ||
-                                    verify_thread_starttime(p, t) < 0)
+                                if (verify_process_user(u, p) >= 0 &&
+                                    verify_process_starttime(p) >= 0 &&
+                                    verify_thread_starttime(p, t) >= 0)
                                         thread_reset(t);
 }
 

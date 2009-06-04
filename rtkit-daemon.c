@@ -2,6 +2,7 @@
 
 #define _GNU_SOURCE
 
+#include <stdbool.h>
 #include <unistd.h>
 #include <stdio.h>
 #include <errno.h>
@@ -17,6 +18,8 @@
 #include <pwd.h>
 #include <sys/capability.h>
 #include <sys/prctl.h>
+#include <time.h>
+#include <assert.h>
 
 #include "rtkit.h"
 
@@ -71,124 +74,73 @@
 
 #define ELEMENTSOF(x) (sizeof(x)/sizeof(x[0]))
 
-struct process {
+#define PROCESSES_PER_USER_MAX 15
+#define THREADS_PER_USER_MAX 25
+#define USERS_MAX 2048
+
+#define ACTIONS_BURST_SEC (20)
+#define ACTIONS_PER_BURST THREADS_PER_USER_MAX
+
+struct thread {
+        /* We use the thread id plus its starttime as a unique identifier for threads */
         pid_t pid;
-        uid_t uid;
         unsigned long long starttime;
+
+        struct thread *next;
 };
 
-static int startswith(const char *s, const char *prefix) {
-        return strncmp(s, prefix, strlen(prefix)) == 0;
-}
+struct process {
+        /* We use the process id plus its starttime as a unique identifier for processes */
+        pid_t pid;
+        unsigned long long starttime;
 
-static int self_set_realtime(void) {
-        struct sched_param param;
-        int r;
+        struct thread *threads;
+        struct process *next;
+};
 
-        memset(&param, 0, sizeof(param));
-        param.sched_priority = OUR_RR_PRIORITY;
+struct user {
+        uid_t uid;
 
-        if (sched_setscheduler(0, SCHED_RR|SCHED_RESET_ON_FORK, &param) < 0) {
-                r = -errno;
-                fprintf(stderr, "Failed to make ourselves SCHED_RR: %s\n", strerror(errno));
-                goto finish;
+        time_t timestamp;
+        unsigned n_actions;
+
+        struct process *processes;
+        unsigned n_processes;
+        unsigned n_threads;
+
+        struct user *next;
+};
+
+static struct user *users = NULL;
+static unsigned n_users = 0;
+
+static char* get_user_name(uid_t uid, char *user, size_t len) {
+        struct passwd *pw;
+
+        if ((pw = getpwuid(uid))) {
+                strncpy(user, pw->pw_name, len-1);
+                user[len-1] = 0;
+                return user;
         }
 
-        r = 0;
-
-finish:
-        return r;
+        snprintf(user, len-1, "%llu", (unsigned long long) uid);
+        user[len-1] = 0;
+        return user;
 }
 
-static void self_drop_realtime(void) {
-        struct sched_param param;
-
-        memset(&param, 0, sizeof(param));
-
-        if (sched_setscheduler(0, SCHED_OTHER, &param) < 0)
-                fprintf(stderr, "Warning: Failed to reset scheduling to SCHED_OTHER: %s\n", strerror(errno));
-
-        if (setpriority(PRIO_PROCESS, 0, OUR_NICE_LEVEL) < 0)
-                fprintf(stderr, "Warning: Failed to reset nice level to %u: %s\n", OUR_NICE_LEVEL, strerror(errno));
-}
-
-static int verify_rttime(struct process *p) {
-        char fn[128];
-        FILE *f;
-        int r, good = 0;
-
-        /* Verifies that RLIMIT_RTTIME is set for the specified process */
-
-        assert_se(snprintf(fn, sizeof(fn)-1, "/proc/%llu/limits", (unsigned long long) p->pid) < (int) (sizeof(fn)-1));
-        fn[sizeof(fn)-1] = 0;
-
-        if (!(f = fopen(fn, "r"))) {
-                r = -errno;
-                fprintf(stderr, "Failed to open '%s': %s\n", fn, strerror(errno));
-                return r;
-        }
-
-        for (;;) {
-                char line[128];
-                char soft[32], hard[32];
-                unsigned long long rttime;
-                char *e = NULL;
-
-                if (!fgets(line, sizeof(line), f))
-                        break;
-
-                if (!startswith(line, "Max realtime timeout"))
-                        continue;
-
-                if (sscanf(line + 20, "%s %s", soft, hard) != 2)
-                        break;
-
-                errno = 0;
-                rttime = strtoll(hard, &e, 10);
-
-                if (errno != 0 || !e || *e != 0)
-                        break;
-
-                if (rttime <= RTKIT_RTTIME_MAX_NS)
-                        good = 1;
-
-                break;
-        }
-
-        fclose(f);
-
-        return good ? 0 : -EPERM;
-}
-
-static int verify_user(struct process *p) {
-        char fn[128];
-        int r;
-        struct stat st;
-
-        assert_se(snprintf(fn, sizeof(fn)-1, "/proc/%llu", (unsigned long long) p->pid) < (int) (sizeof(fn)-1));
-        fn[sizeof(fn)-1] = 0;
-
-        memset(&st, 0, sizeof(st));
-        if (stat(fn, &st) < 0) {
-                r = -errno;
-                fprintf(stderr, "Failed to stat() file '%s': %s\n", fn, strerror(errno));
-                return r;
-        }
-
-        return st.st_uid == p->uid ? 0 : -EPERM;
-}
-
-static int read_starttime(pid_t pid, unsigned long long *st) {
+static int read_starttime(pid_t pid, pid_t tid, unsigned long long *st) {
         char fn[128];
         int r;
         FILE *f;
 
-        assert_se(snprintf(fn, sizeof(fn)-1, "/proc/%llu/stat", (unsigned long long) pid) < (int) (sizeof(fn)-1));
+        if (tid != 0)
+                assert_se(snprintf(fn, sizeof(fn)-1, "/proc/%llu/task/%llu/stat", (unsigned long long) pid, (unsigned long long) tid) < (int) (sizeof(fn)-1));
+        else
+                assert_se(snprintf(fn, sizeof(fn)-1, "/proc/%llu/stat", (unsigned long long) pid) < (int) (sizeof(fn)-1));
         fn[sizeof(fn)-1] = 0;
 
         if (!(f = fopen(fn, "r"))) {
                 r = -errno;
-                fprintf(stderr, "Failed to open '%s': %s\n", fn, strerror(errno));
                 return r;
         }
 
@@ -224,39 +176,423 @@ static int read_starttime(pid_t pid, unsigned long long *st) {
         return 0;
 }
 
-static int verify_starttime(struct process *p) {
+static void free_thread(struct thread *t) {
+        free(t);
+}
+
+static void free_process(struct process *p) {
+        struct thread *t;
+
+        while ((t = p->threads)) {
+                p->threads = t->next;
+                free_thread(t);
+        }
+
+        free(p);
+}
+
+static void free_user(struct user *u) {
+        struct process *p;
+
+        while ((p = u->processes)) {
+                u->processes = p->next;
+                free_process(p);
+        }
+
+        free(u);
+}
+
+static bool user_in_burst(struct user *u) {
+        time_t now = time(NULL);
+
+        return now < u->timestamp + ACTIONS_BURST_SEC;
+}
+
+static bool verify_burst(struct user *u) {
+
+        if (!user_in_burst(u)) {
+                /* Restart burst phase */
+                time(&u->timestamp);
+                u->n_actions = 0;
+                return true;
+        }
+
+        if (u->n_actions >= ACTIONS_PER_BURST) {
+                char user[64];
+                fprintf(stderr, "Warning: Reached burst limit for user '%s', denying request.\n", get_user_name(u->uid, user, sizeof(user)));
+                return false;
+        }
+
+        u->n_actions++;
+        return true;
+}
+
+static int find_user(struct user **_u, uid_t uid) {
+        struct user *u;
+
+        for (u = users; u; u = u->next)
+                if (u->uid == uid) {
+                        *_u = u;
+                        return 0;
+                }
+
+        if (n_users >= USERS_MAX)  {
+                fprintf(stderr, "Warning: Reached maximum concurrent user limit, denying request.\n");
+                return -EBUSY;
+        }
+
+        if (!(u = malloc(sizeof(struct user))))
+                return -ENOMEM;
+
+        u->uid = uid;
+        u->timestamp = time(NULL);
+        u->n_actions = 0;
+        u->processes = NULL;
+        u->n_processes = u->n_threads = 0;
+        u->next = users;
+        users = u;
+        n_users++;
+
+        *_u = u;
+        return 0;
+}
+
+static int find_process(struct process** _p, struct user *u, pid_t pid, unsigned long long starttime) {
+        struct process *p;
+
+        for (p = u->processes; p; p = p->next)
+                if (p->pid == pid && p->starttime == starttime) {
+                        *_p = p;
+                        return 0;
+                }
+
+        if (u->n_processes >= PROCESSES_PER_USER_MAX) {
+                char user[64];
+                fprintf(stderr, "Warning: Reached maximum concurrent process limit for user '%s', denying request.\n", get_user_name(u->uid, user, sizeof(user)));
+                return -EBUSY;
+        }
+
+        if (!(p = malloc(sizeof(struct process))))
+                return -ENOMEM;
+
+        p->pid = pid;
+        p->starttime = starttime;
+        p->threads = NULL;
+        p->next = u->processes;
+        u->processes = p;
+        u->n_processes++;
+
+        *_p = p;
+        return 0;
+}
+
+static int find_thread(struct thread** _t, struct user *u, struct process *p, pid_t pid, unsigned long long starttime) {
+        struct thread *t;
+
+        for (t = p->threads; t; t = t->next)
+                if (t->pid == pid && t->starttime == starttime)  {
+                        *_t = t;
+                        return 0;
+                }
+
+        if (u->n_threads >= THREADS_PER_USER_MAX) {
+                char user[64];
+                fprintf(stderr, "Warning: Reached maximum concurrent threads limit for user '%s', denying request.\n", get_user_name(u->uid, user, sizeof(user)));
+                return -EBUSY;
+        }
+
+        if (!(t = malloc(sizeof(struct thread))))
+                return -ENOMEM;
+
+        t->pid = pid;
+        t->starttime = starttime;
+        t->next = p->threads;
+        p->threads = t;
+        u->n_threads++;
+
+        *_t = t;
+        return 0;
+}
+
+static bool thread_relevant(struct process *p, struct thread *t) {
         unsigned long long st;
         int r;
 
-        if ((r = read_starttime(p->pid, &st)) < 0)
+        /* This checks if a thread still matters to us, i.e. if its
+         * PID still refers to the same thread and if it is still high
+         * priority or real time */
+
+        if ((r = read_starttime(p->pid, t->pid, &st)) < 0) {
+
+                /* Did the thread die? */
+                if (r == -ENOENT)
+                        return FALSE;
+
+                fprintf(stderr, "Warning: failed to read start time: %s\n", strerror(-r));
+                return FALSE;
+        }
+
+        /* Did the thread get replaced by another thread? */
+        if (st != t->starttime)
+                return FALSE;
+
+        if ((r = sched_getscheduler(t->pid)) < 0) {
+
+                /* Maybe it died right now? */
+                if (errno == ESRCH)
+                        return FALSE;
+
+                fprintf(stderr, "Warning: failed to read scheduler policy: %s\n", strerror(errno));
+                return FALSE;
+        }
+
+        /* Is this a realtime thread? */
+        r &= ~SCHED_RESET_ON_FORK;
+        if (r == SCHED_RR || r == SCHED_FIFO)
+                return TRUE;
+
+        errno = 0;
+        r = getpriority(PRIO_PROCESS, t->pid);
+        if (errno != 0) {
+
+                /* Maybe it died right now? */
+                if (errno == ESRCH)
+                        return FALSE;
+
+                fprintf(stderr, "Warning: failed to read nice level: %s\n", strerror(errno));
+                return FALSE;
+        }
+
+        /* Is this a high priority thread? */
+        if (r < 0)
+                return TRUE;
+
+        return FALSE;
+}
+
+static void thread_gc(struct user *u, struct process *p) {
+        struct thread *t, *n, *l;
+
+        /* Cleanup dead theads of a specific user we don't need to keep track about anymore */
+
+        for (l = NULL, t = p->threads; t; t = n) {
+                n = t->next;
+
+                if (!thread_relevant(p, t)) {
+                        free_thread(t);
+                        if (l)
+                                l->next = n;
+                        else
+                                p->threads = n;
+                        assert(u->n_threads >= 1);
+                        u->n_threads--;
+                } else
+                        l = t;
+        }
+
+        assert(!p->threads || u->n_threads);
+}
+
+static void process_gc(struct user *u) {
+        struct process *p, *n, *l;
+
+        /* Cleanup dead processes of a specific user we don't need to keep track about anymore */
+
+        for (l = NULL, p = u->processes; p; p = n) {
+                n = p->next;
+                thread_gc(u, p);
+
+                if (!p->threads) {
+                        free_process(p);
+                        if (l)
+                                l->next = n;
+                        else
+                                u->processes = n;
+
+                        assert(u->n_processes >= 1);
+                        u->n_processes--;
+                } else
+                        l = p;
+        }
+
+        assert(!u->processes == !u->n_processes);
+}
+
+static void user_gc(void) {
+        struct user *u, *n, *l;
+
+        /* Cleanup all users we don't need to keep track about anymore */
+
+        for (l = NULL, u = users; u; u = n) {
+                n = u->next;
+                process_gc(u);
+
+                if (!u->processes && !user_in_burst(u)) {
+                        free_user(u);
+                        if (l)
+                                l->next = n;
+                        else
+                                users = n;
+
+                        assert(n_users >= 1);
+                        n_users--;
+                } else
+                        l = u;
+        }
+
+        assert(!users == !n_users);
+}
+
+static bool startswith(const char *s, const char *prefix) {
+        return strncmp(s, prefix, strlen(prefix)) == 0;
+}
+
+static int self_set_realtime(void) {
+        struct sched_param param;
+        int r;
+
+        memset(&param, 0, sizeof(param));
+        param.sched_priority = OUR_RR_PRIORITY;
+
+        if (sched_setscheduler(0, SCHED_RR|SCHED_RESET_ON_FORK, &param) < 0) {
+                r = -errno;
+                fprintf(stderr, "Failed to make ourselves SCHED_RR: %s\n", strerror(errno));
+                goto finish;
+        }
+
+        r = 0;
+
+finish:
+        return r;
+}
+
+static void self_drop_realtime(void) {
+        struct sched_param param;
+
+        memset(&param, 0, sizeof(param));
+
+        if (sched_setscheduler(0, SCHED_OTHER, &param) < 0)
+                fprintf(stderr, "Warning: Failed to reset scheduling to SCHED_OTHER: %s\n", strerror(errno));
+
+        if (setpriority(PRIO_PROCESS, 0, OUR_NICE_LEVEL) < 0)
+                fprintf(stderr, "Warning: Failed to reset nice level to %u: %s\n", OUR_NICE_LEVEL, strerror(errno));
+}
+
+static int verify_process_rttime(struct process *p) {
+        char fn[128];
+        FILE *f;
+        int r;
+        bool good = false;
+
+        /* Verifies that RLIMIT_RTTIME is set for the specified process */
+
+        assert_se(snprintf(fn, sizeof(fn)-1, "/proc/%llu/limits", (unsigned long long) p->pid) < (int) (sizeof(fn)-1));
+        fn[sizeof(fn)-1] = 0;
+
+        if (!(f = fopen(fn, "r"))) {
+                r = -errno;
+                fprintf(stderr, "Failed to open '%s': %s\n", fn, strerror(errno));
                 return r;
+        }
+
+        for (;;) {
+                char line[128];
+                char soft[32], hard[32];
+                unsigned long long rttime;
+                char *e = NULL;
+
+                if (!fgets(line, sizeof(line), f))
+                        break;
+
+                if (!startswith(line, "Max realtime timeout"))
+                        continue;
+
+                if (sscanf(line + 20, "%s %s", soft, hard) != 2) {
+                        fprintf(stderr, "Warning: parse failure in %s.\n", fn);
+                        break;
+                }
+
+                errno = 0;
+                rttime = strtoll(hard, &e, 10);
+
+                if (errno != 0 || !e || *e != 0)
+                        break;
+
+                if (rttime <= RTKIT_RTTIME_MAX_NS)
+                        good = true;
+
+                break;
+        }
+
+        fclose(f);
+
+        return good ? 0 : -EPERM;
+}
+
+static int verify_process_user(struct user *u, struct process *p) {
+        char fn[128];
+        int r;
+        struct stat st;
+
+        assert_se(snprintf(fn, sizeof(fn)-1, "/proc/%llu", (unsigned long long) p->pid) < (int) (sizeof(fn)-1));
+        fn[sizeof(fn)-1] = 0;
+
+        memset(&st, 0, sizeof(st));
+        if (stat(fn, &st) < 0) {
+                r = -errno;
+
+                if (r != -ENOENT)
+                        fprintf(stderr, "Warning: Failed to stat() file '%s': %s\n", fn, strerror(-r));
+
+                return r;
+        }
+
+        return st.st_uid == u->uid ? 0 : -EPERM;
+}
+
+static int verify_process_starttime(struct process *p) {
+        unsigned long long st;
+        int r;
+
+        if ((r = read_starttime(p->pid, 0, &st)) < 0) {
+
+                if (r != -ENOENT)
+                        fprintf(stderr, "Warning: Failed to read start time of process %llu: %s\n", (unsigned long long) p->pid, strerror(-r));
+
+                return r;
+        }
 
         return st == p->starttime ? 0 : -EPERM;
 }
 
-static int verify_thread(struct process *p, pid_t thread) {
-        char fn[128];
+static int verify_thread_starttime(struct process *p, struct thread *t) {
+        unsigned long long st;
+        int r;
 
-        /* Verifies that the specified thread exists in the specified
-         * process */
+        if ((r = read_starttime(p->pid, t->pid, &st)) < 0) {
 
-        assert_se(snprintf(fn, sizeof(fn)-1, "/proc/%llu/task/%llu", (unsigned long long) p->pid, (unsigned long long) thread) < (int) (sizeof(fn)-1));
-        fn[sizeof(fn)-1] = 0;
+                if (r != -ENOENT)
+                        fprintf(stderr, "Warning: Failed to read start time of thread %llu: %s\n", (unsigned long long) t->pid, strerror(-r));
 
-        return access(fn, F_OK) == 0 ? 0 : -errno;
+                return r;
+        }
+
+        return st == t->starttime ? 0 : -EPERM;
 }
 
-static void thread_reset(pid_t thread) {
+static void thread_reset(struct thread *t) {
         struct sched_param param;
 
         memset(&param, 0, sizeof(param));
         param.sched_priority = 0;
 
-        if (sched_setscheduler(thread, SCHED_OTHER, &param) < 0)
-                fprintf(stderr, "Warning: Failed to reset scheduling to SCHED_OTHER for thread %llu: %s\n", (unsigned long long) thread, strerror(errno));
+        if (sched_setscheduler(t->pid, SCHED_OTHER, &param) < 0)
+                if (errno != ESRCH)
+                        fprintf(stderr, "Warning: Failed to reset scheduling to SCHED_OTHER for thread %llu: %s\n", (unsigned long long) t->pid, strerror(errno));
 
-        if (setpriority(PRIO_PROCESS, thread, 0) < 0)
-                fprintf(stderr, "Warning: Failed to reset nice level to 0 for thread %llu: %s\n", (unsigned long long) thread, strerror(errno));
+        if (setpriority(PRIO_PROCESS, t->pid, 0) < 0)
+                if (errno != ESRCH)
+                        fprintf(stderr, "Warning: Failed to reset nice level to 0 for thread %llu: %s\n", (unsigned long long) t->pid, strerror(errno));
 }
 
 static char* get_exe_name(pid_t pid, char *exe, size_t len) {
@@ -275,37 +611,23 @@ static char* get_exe_name(pid_t pid, char *exe, size_t len) {
         return exe;
 }
 
-static char* get_user_name(uid_t uid, char *user, size_t len) {
-        struct passwd *pw;
-
-        if ((pw = getpwuid(uid))) {
-                strncpy(user, pw->pw_name, len-1);
-                user[len-1] = 0;
-                return user;
-        }
-
-        snprintf(user, len-1, "%llu", (unsigned long long) uid);
-        user[len-1] = 0;
-        return user;
-}
-
-static int process_set_realtime(struct process *p, pid_t thread, unsigned priority) {
+static int process_set_realtime(struct user *u, struct process *p, struct thread *t, unsigned priority) {
         int r;
         struct sched_param param;
         char user[64], exe[128];
-
-        if (thread < 0)
-                return -EINVAL;
 
         if ((int) priority < sched_get_priority_min(SCHED_RR) ||
             (int) priority > sched_get_priority_max(SCHED_RR))
                 return -EINVAL;
 
+        /* We always want to be able to get a higher RT priority than
+         * the client */
         if (priority >= OUR_RR_PRIORITY)
                 return -EPERM;
 
-        if (thread == 0)
-                thread = p->pid;
+        /* Make sure users don't flood us with requests */
+        if (!verify_burst(u))
+                return -EBUSY;
 
         /* Temporarily become a realtime process. We do this to make
          * sure that our verification code is not preempted by an evil
@@ -316,38 +638,38 @@ static int process_set_realtime(struct process *p, pid_t thread, unsigned priori
 
         /* Let's make sure that everything is alright before we make
          * the process realtime */
-        if ((r = verify_user(p)) < 0 ||
-            (r = verify_starttime(p)) < 0 ||
-            (r = verify_rttime(p)) < 0 ||
-            (r = verify_thread(p, thread)) < 0)
+        if ((r = verify_process_user(u, p)) < 0 ||
+            (r = verify_process_starttime(p)) < 0 ||
+            (r = verify_process_rttime(p)) < 0 ||
+            (r = verify_thread_starttime(p, t)) < 0)
                 goto finish;
 
         /* Ok, everything seems to be in order, now, let's do it */
         memset(&param, 0, sizeof(param));
         param.sched_priority = (int) priority;
-        if (sched_setscheduler(thread, SCHED_RR|SCHED_RESET_ON_FORK, &param) < 0) {
+        if (sched_setscheduler(t->pid, SCHED_RR|SCHED_RESET_ON_FORK, &param) < 0) {
                 r = -errno;
-                fprintf(stderr, "Failed to make thread %llu SCHED_RR: %s\n", (unsigned long long) thread, strerror(errno));
+                fprintf(stderr, "Failed to make thread %llu SCHED_RR: %s\n", (unsigned long long) t->pid, strerror(errno));
                 goto finish;
         }
 
         /* We do some sanity checks afterwards, to verify that the
          * caller didn't play games with us and replaced the process
          * behind the PID */
-        if ((r = verify_thread(p, thread)) < 0 ||
-            (r = verify_rttime(p)) < 0 ||
-            (r = verify_starttime(p)) < 0 ||
-            (r = verify_user(p)) < 0) {
+        if ((r = verify_thread_starttime(p, t)) < 0 ||
+            (r = verify_process_rttime(p)) < 0 ||
+            (r = verify_process_starttime(p)) < 0 ||
+            (r = verify_process_user(u, p)) < 0) {
 
-                thread_reset(thread);
+                thread_reset(t);
                 goto finish;
         }
 
         fprintf(stderr, "Sucessfully made thread %llu of process %llu (%s) owned by '%s' SCHED_RR at priority %u.\n",
-                (unsigned long long) thread,
+                (unsigned long long) t->pid,
                 (unsigned long long) p->pid,
                 get_exe_name(p->pid, exe, sizeof(exe)),
-                get_user_name(p->uid, user, sizeof(user)),
+                get_user_name(u->uid, user, sizeof(user)),
                 priority);
 
         r = 0;
@@ -358,19 +680,17 @@ finish:
         return r;
 }
 
-static int process_set_high_priority(struct process *p, pid_t thread, int priority) {
+static int process_set_high_priority(struct user *u, struct process *p, struct thread *t, int priority) {
         int r;
         struct sched_param param;
         char user[64], exe[128];
 
-        if (thread < 0)
-                return -EINVAL;
-
         if (priority < -20 || priority > 19)
                 return -EINVAL;
 
-        if (thread == 0)
-                thread = p->pid;
+        /* Make sure users don't flood us with requests */
+        if (!verify_burst(u))
+                return -EBUSY;
 
         /* Temporarily become a realtime process */
         if ((r = self_set_realtime()) < 0)
@@ -378,39 +698,39 @@ static int process_set_high_priority(struct process *p, pid_t thread, int priori
 
         /* Let's make sure that everything is alright before we make
          * the process high priority */
-        if ((r = verify_user(p)) < 0 ||
-            (r = verify_starttime(p)) < 0 ||
-            (r = verify_thread(p, thread)) < 0)
+        if ((r = verify_process_user(u, p)) < 0 ||
+            (r = verify_process_starttime(p)) < 0 ||
+            (r = verify_thread_starttime(p, t)) < 0)
                 goto finish;
 
         /* Ok, everything seems to be in order, now, let's do it */
         memset(&param, 0, sizeof(param));
         param.sched_priority = 0;
-        if (sched_setscheduler(thread, SCHED_OTHER|SCHED_RESET_ON_FORK, &param) < 0) {
+        if (sched_setscheduler(t->pid, SCHED_OTHER|SCHED_RESET_ON_FORK, &param) < 0) {
                 r = -errno;
-                fprintf(stderr, "Failed to make process %llu SCHED_NORMAL: %s\n", (unsigned long long) thread, strerror(errno));
+                fprintf(stderr, "Failed to make process %llu SCHED_NORMAL: %s\n", (unsigned long long) t->pid, strerror(errno));
                 goto finish;
         }
 
-        if (setpriority(PRIO_PROCESS, thread, priority) < 0) {
+        if (setpriority(PRIO_PROCESS, t->pid, priority) < 0) {
                 r = -errno;
-                fprintf(stderr, "Failed to set nice level of process %llu to %i: %s\n", (unsigned long long) thread, priority, strerror(errno));
+                fprintf(stderr, "Failed to set nice level of process %llu to %i: %s\n", (unsigned long long) t->pid, priority, strerror(errno));
                 goto finish;
         }
 
-        if ((r = verify_thread(p, thread)) < 0 ||
-            (r = verify_starttime(p)) < 0 ||
-            (r = verify_user(p)) < 0) {
+        if ((r = verify_thread_starttime(p, t)) < 0 ||
+            (r = verify_process_starttime(p)) < 0 ||
+            (r = verify_process_user(u, p)) < 0) {
 
-                thread_reset(thread);
+                thread_reset(t);
                 goto finish;
         }
 
         fprintf(stderr, "Sucessfully made thread %llu of process %llu (%s) owned by '%s' high priority at nice level %i.\n",
-                (unsigned long long) thread,
+                (unsigned long long) t->pid,
                 (unsigned long long) p->pid,
                 get_exe_name(p->pid, exe, sizeof(exe)),
-                get_user_name(p->uid, user, sizeof(user)),
+                get_user_name(u->uid, user, sizeof(user)),
                 priority);
 
         r = 0;
@@ -466,20 +786,30 @@ finish:
         return (unsigned long) pid;
 }
 
-static int process_fill(struct process *p, DBusConnection *c, DBusMessage *m) {
+static int lookup_client(
+                struct user **_u,
+                struct process **_p,
+                struct thread **_t,
+                DBusConnection *c,
+                DBusMessage *m,
+                pid_t tid) {
+
         DBusError error;
         int r;
         unsigned long pid, uid;
+        unsigned long long starttime;
+        struct user *u;
+        struct process *p;
+        struct thread *t;
 
         dbus_error_init(&error);
 
+        /* Determine caller credentials */
         if ((uid = dbus_bus_get_unix_user(c, dbus_message_get_sender(m), &error)) == (unsigned long) -1) {
                 fprintf(stderr, "dbus_message_get_unix_user() failed: %s\n", error.message);
                 r = -EIO;
                 goto fail;
         }
-
-        p->uid = (uid_t) uid;
 
         if ((pid = get_unix_process_id(c, dbus_message_get_sender(m), &error)) == (unsigned long) -1) {
                 fprintf(stderr, "get_unix_process_id() failed: %s\n", error.message);
@@ -487,10 +817,30 @@ static int process_fill(struct process *p, DBusConnection *c, DBusMessage *m) {
                 goto fail;
         }
 
-        p->pid = (uid_t) pid;
-
-        if ((r = read_starttime(p->pid, &p->starttime)) < 0)
+        /* Find or create user structure */
+        if ((r = find_user(&u, (uid_t) uid) < 0))
                 goto fail;
+
+        /* Find or create process structure */
+        if ((r = read_starttime((pid_t) pid, 0, &starttime)) < 0)
+                goto fail;
+
+        if ((r = find_process(&p, u, (pid_t) pid, starttime)) < 0)
+                goto fail;
+
+        /* Find or create thread structure */
+        if (tid == 0)
+                tid = p->pid;
+
+        if ((r = read_starttime(p->pid, tid, &starttime)) < 0)
+                goto fail;
+
+        if ((r = find_thread(&t, u, p, (pid_t) tid, starttime)) < 0)
+                goto fail;
+
+        *_u = u;
+        *_p = p;
+        *_t = t;
 
         return 0;
 
@@ -504,6 +854,7 @@ static const char *translate_error(int error) {
         switch (error) {
                 case -EPERM:
                 case -EACCES:
+                case -EBUSY:
                         return DBUS_ERROR_ACCESS_DENIED;
 
                 case -ENOMEM:
@@ -520,11 +871,16 @@ static DBusHandlerResult dbus_handler(DBusConnection *c, DBusMessage *m, void *u
 
         dbus_error_init(&error);
 
+        /* We garbage collect on every user call */
+        user_gc();
+
         if (dbus_message_is_method_call(m, "org.freedesktop.RealtimeKit1", "MakeThreadRealtime")) {
 
                 uint64_t thread;
                 uint32_t priority;
-                struct process p;
+                struct user *u;
+                struct process *p;
+                struct thread *t;
                 int ret;
 
                 if (!dbus_message_get_args(m, &error,
@@ -538,12 +894,12 @@ static DBusHandlerResult dbus_handler(DBusConnection *c, DBusMessage *m, void *u
                         goto finish;
                 }
 
-                if ((ret = process_fill(&p, c, m)) < 0) {
+                if ((ret = lookup_client(&u, &p, &t, c, m, (pid_t) thread)) < 0) {
                         assert_se(r = dbus_message_new_error_printf(m, translate_error(ret), strerror(-ret)));
                         goto finish;
                 }
 
-                if ((ret = process_set_realtime(&p, (pid_t) thread, priority))) {
+                if ((ret = process_set_realtime(u, p, t, priority))) {
                         assert_se(r = dbus_message_new_error_printf(m, translate_error(ret), strerror(-ret)));
                         goto finish;
                 }
@@ -554,7 +910,9 @@ static DBusHandlerResult dbus_handler(DBusConnection *c, DBusMessage *m, void *u
 
                 uint64_t thread;
                 int32_t priority;
-                struct process p;
+                struct user *u;
+                struct process *p;
+                struct thread *t;
                 int ret;
 
                 if (!dbus_message_get_args(m, &error,
@@ -568,12 +926,12 @@ static DBusHandlerResult dbus_handler(DBusConnection *c, DBusMessage *m, void *u
                         goto finish;
                 }
 
-                if ((ret = process_fill(&p, c, m)) < 0) {
+                if ((ret = lookup_client(&u, &p, &t, c, m, (pid_t) thread)) < 0) {
                         assert_se(r = dbus_message_new_error_printf(m, translate_error(ret), strerror(-ret)));
                         goto finish;
                 }
 
-                if ((ret = process_set_high_priority(&p, (pid_t) thread, priority))) {
+                if ((ret = process_set_high_priority(u, p, t, priority))) {
                         assert_se(r = dbus_message_new_error_printf(m, translate_error(ret), strerror(-ret)));
                         goto finish;
                 }
@@ -738,6 +1096,7 @@ static int set_resource_limits(void) {
 int main(int argc, char *argv[]) {
         DBusConnection *bus = NULL;
         int ret = 1;
+        struct user *u;
 
         self_drop_realtime();
 
@@ -755,7 +1114,7 @@ int main(int argc, char *argv[]) {
 
         fprintf(stderr, "Running.\n");
 
-        while (dbus_connection_read_write_dispatch(bus, -1))
+        while (!dbus_connection_read_write_dispatch(bus, -1))
                 ;
 
         ret = 0;
@@ -764,6 +1123,11 @@ finish:
 
         if (bus)
                 dbus_connection_unref(bus);
+
+        while ((u = users)) {
+                users = u->next;
+                free_user(u);
+        }
 
         return ret;
 }

@@ -39,6 +39,7 @@
 #include <sys/prctl.h>
 #include <time.h>
 #include <assert.h>
+#include <getopt.h>
 
 #include "rtkit.h"
 
@@ -89,31 +90,46 @@
 #define ELEMENTSOF(x) (sizeof(x)/sizeof(x[0]))
 
 /* If we actually execute a request we temporarily upgrade our realtime priority to this level */
-#define OUR_RR_PRIORITY 30
+static unsigned our_realtime_priority = 30;
 
 /* Normally we run at this nice level */
-#define OUR_NICE_LEVEL 1
+static int our_nice_level = 1;
+
+/* The maximum realtime priority to hand out */
+static unsigned max_realtime_priority = 29;
+
+/* The minimum nice level to hand out */
+static int min_nice_level = -15;
 
 /* Username we shall run under */
-#define USERNAME "rtkit"
+static const char *username = "rtkit";
 
 /* Enforce that clients have RLIMIT_RTTIME set to a value <= this */
-#define RTKIT_RTTIME_MAX_NS 200000000ULL /* 200 ms */
+static unsigned long long rttime_ns_max = 200000000ULL; /* 200 ms */
 
 /* How many users do we supervise at max? */
-#define USERS_MAX 2048
+static unsigned users_max = 2048;
 
 /* How many processes of a single user do we supervise at max? */
-#define PROCESSES_PER_USER_MAX 15
+static unsigned processes_per_user_max = 15;
 
 /* How many threads of a single user do we supervise at max? */
-#define THREADS_PER_USER_MAX 25
+static unsigned threads_per_user_max = 25;
 
 /* Refuse further requests if one user issues more than ACTIONS_PER_BURST_MAX in this time */
-#define ACTIONS_BURST_SEC (20)
+static unsigned actions_burst_sec = 20;
 
 /* Refuse further requests if one user issues more than this many in ACTIONS_BURST_SEC time */
-#define ACTIONS_PER_BURST_MAX THREADS_PER_USER_MAX
+static unsigned actions_per_burst_max = 25;
+
+/* Drop priviliges */
+static bool do_drop_priviliges = TRUE;
+
+/* Change root directory to /proc */
+static bool do_chroot = TRUE;
+
+/* Limit resources */
+static bool do_limit_resources = TRUE;
 
 struct thread {
         /* We use the thread id plus its starttime as a unique identifier for threads */
@@ -251,7 +267,7 @@ static void free_user(struct user *u) {
 static bool user_in_burst(struct user *u) {
         time_t now = time(NULL);
 
-        return now < u->timestamp + ACTIONS_BURST_SEC;
+        return now < u->timestamp + actions_burst_sec;
 }
 
 static bool verify_burst(struct user *u) {
@@ -263,7 +279,7 @@ static bool verify_burst(struct user *u) {
                 return true;
         }
 
-        if (u->n_actions >= ACTIONS_PER_BURST_MAX) {
+        if (u->n_actions >= actions_per_burst_max) {
                 char user[64];
                 fprintf(stderr, "Warning: Reached burst limit for user '%s', denying request.\n", get_user_name(u->uid, user, sizeof(user)));
                 return false;
@@ -282,7 +298,7 @@ static int find_user(struct user **_u, uid_t uid) {
                         return 0;
                 }
 
-        if (n_users >= USERS_MAX)  {
+        if (n_users >= users_max)  {
                 fprintf(stderr, "Warning: Reached maximum concurrent user limit, denying request.\n");
                 return -EBUSY;
         }
@@ -312,7 +328,7 @@ static int find_process(struct process** _p, struct user *u, pid_t pid, unsigned
                         return 0;
                 }
 
-        if (u->n_processes >= PROCESSES_PER_USER_MAX) {
+        if (u->n_processes >= processes_per_user_max) {
                 char user[64];
                 fprintf(stderr, "Warning: Reached maximum concurrent process limit for user '%s', denying request.\n", get_user_name(u->uid, user, sizeof(user)));
                 return -EBUSY;
@@ -342,7 +358,7 @@ static int find_thread(struct thread** _t, struct user *u, struct process *p, pi
                         return 0;
                 }
 
-        if (u->n_threads >= THREADS_PER_USER_MAX) {
+        if (u->n_threads >= threads_per_user_max) {
                 char user[64];
                 fprintf(stderr, "Warning: Reached maximum concurrent threads limit for user '%s', denying request.\n", get_user_name(u->uid, user, sizeof(user)));
                 return -EBUSY;
@@ -507,7 +523,7 @@ static int self_set_realtime(void) {
         int r;
 
         memset(&param, 0, sizeof(param));
-        param.sched_priority = OUR_RR_PRIORITY;
+        param.sched_priority = our_realtime_priority;
 
         if (sched_setscheduler(0, SCHED_RR|SCHED_RESET_ON_FORK, &param) < 0) {
                 r = -errno;
@@ -529,8 +545,8 @@ static void self_drop_realtime(void) {
         if (sched_setscheduler(0, SCHED_OTHER, &param) < 0)
                 fprintf(stderr, "Warning: Failed to reset scheduling to SCHED_OTHER: %s\n", strerror(errno));
 
-        if (setpriority(PRIO_PROCESS, 0, OUR_NICE_LEVEL) < 0)
-                fprintf(stderr, "Warning: Failed to reset nice level to %u: %s\n", OUR_NICE_LEVEL, strerror(errno));
+        if (setpriority(PRIO_PROCESS, 0, our_nice_level) < 0)
+                fprintf(stderr, "Warning: Failed to reset nice level to %u: %s\n", our_nice_level, strerror(errno));
 }
 
 /* Verifies that RLIMIT_RTTIME is set for the specified process */
@@ -572,7 +588,7 @@ static int verify_process_rttime(struct process *p) {
                 if (errno != 0 || !e || *e != 0)
                         break;
 
-                if (rttime <= RTKIT_RTTIME_MAX_NS)
+                if (rttime <= rttime_ns_max)
                         good = true;
 
                 break;
@@ -676,7 +692,8 @@ static int process_set_realtime(struct user *u, struct process *p, struct thread
 
         /* We always want to be able to get a higher RT priority than
          * the client */
-        if (priority >= OUR_RR_PRIORITY)
+        if (priority >= our_realtime_priority ||
+            priority > max_realtime_priority)
                 return -EPERM;
 
         /* Make sure users don't flood us with requests */
@@ -739,8 +756,11 @@ static int process_set_high_priority(struct user *u, struct process *p, struct t
         struct sched_param param;
         char user[64], exe[128];
 
-        if (priority < -20 || priority > 19)
+        if (priority < PRIO_MIN || priority >= PRIO_MAX)
                 return -EINVAL;
+
+        if (priority < min_nice_level)
+                return -EPERM;
 
         /* Make sure users don't flood us with requests */
         if (!verify_burst(u))
@@ -1078,80 +1098,91 @@ fail:
 }
 
 static int drop_priviliges(void) {
-        struct passwd *pw;
+        struct passwd *pw = NULL;
         int r;
-        cap_t caps;
-        const cap_value_t cap_values[] = {
-                CAP_SYS_NICE,             /* Needed for obvious reasons */
-                CAP_DAC_READ_SEARCH,      /* Needed so that we can verify resource limits */
-                CAP_SYS_PTRACE            /* Needed so that we can read /proc/$$/exe. Linux is weird. */
-        };
 
-        /* First, get user data */
-        if (!(pw = getpwnam(USERNAME))) {
-                fprintf(stderr, "Failed to find user '%s'.\n", USERNAME);
-                return -ENOENT;
+        if (do_drop_priviliges) {
+
+                /* First, get user data */
+                if (!(pw = getpwnam(username))) {
+                        fprintf(stderr, "Failed to find user '%s'.\n", username);
+                        return -ENOENT;
+                }
         }
 
-        /* Second, chroot() */
-        if (chroot("/proc") < 0 ||
-            chdir("/") < 0) {
-                r = -errno;
-                fprintf(stderr, "Failed to chroot() to /proc: %s\n", strerror(errno));
-                return r;
-        }
-        proc = "/";
+        if (do_chroot) {
 
-        /* Third, say that we want to keep caps */
-        if (prctl(PR_SET_KEEPCAPS, 1) < 0) {
-                r = -errno;
-                fprintf(stderr, "PR_SET_KEEPCAPS failed: %s\n", strerror(errno));
-                return r;
+                /* Second, chroot() */
+                if (chroot("/proc") < 0 ||
+                    chdir("/") < 0) {
+                        r = -errno;
+                        fprintf(stderr, "Failed to chroot() to /proc: %s\n", strerror(errno));
+                        return r;
+                }
+                proc = "/";
+
+                fprintf(stderr, "Sucessfully called chroot.\n");
         }
 
-        /* Fourth, drop privs */
-        if (setresgid(pw->pw_gid, pw->pw_gid, pw->pw_gid) < 0 ||
-            setresuid(pw->pw_uid, pw->pw_uid, pw->pw_uid) < 0) {
-                r = -errno;
-                fprintf(stderr, "Failed to become %s: %s\n", USERNAME, strerror(errno));
-                return r;
+        if (do_drop_priviliges) {
+                cap_t caps;
+                const cap_value_t cap_values[] = {
+                        CAP_SYS_NICE,             /* Needed for obvious reasons */
+                        CAP_DAC_READ_SEARCH,      /* Needed so that we can verify resource limits */
+                        CAP_SYS_PTRACE            /* Needed so that we can read /proc/$$/exe. Linux is weird. */
+                };
+
+                /* Third, say that we want to keep caps */
+                if (prctl(PR_SET_KEEPCAPS, 1) < 0) {
+                        r = -errno;
+                        fprintf(stderr, "PR_SET_KEEPCAPS failed: %s\n", strerror(errno));
+                        return r;
+                }
+
+                /* Fourth, drop privs */
+                if (setresgid(pw->pw_gid, pw->pw_gid, pw->pw_gid) < 0 ||
+                    setresuid(pw->pw_uid, pw->pw_uid, pw->pw_uid) < 0) {
+                        r = -errno;
+                        fprintf(stderr, "Failed to become %s: %s\n", username, strerror(errno));
+                        return r;
+                }
+
+                /* Fifth, reset caps flag */
+                if (prctl(PR_SET_KEEPCAPS, 0) < 0) {
+                        r = -errno;
+                        fprintf(stderr, "PR_SET_KEEPCAPS failed: %s\n", strerror(errno));
+                        return r;
+                }
+
+                /* Sixth, reduce caps */
+                assert_se(caps = cap_init());
+                assert_se(cap_clear(caps) == 0);
+                assert_se(cap_set_flag(caps, CAP_EFFECTIVE, ELEMENTSOF(cap_values), cap_values, CAP_SET) == 0);
+                assert_se(cap_set_flag(caps, CAP_PERMITTED, ELEMENTSOF(cap_values), cap_values, CAP_SET) == 0);
+
+                if (cap_set_proc(caps) < 0) {
+                        r = -errno;
+                        fprintf(stderr, "cap_set_proc() failed: %s\n", strerror(errno));
+                        return r;
+                }
+
+                assert_se(cap_free(caps) == 0);
+
+                /* Seventh, update environment */
+                setenv("USER", username, 1);
+                setenv("USERNAME", username, 1);
+                setenv("LOGNAME", username, 1);
+                setenv("HOME", get_proc_path(), 1);
+
+                fprintf(stderr, "Sucessfully dropped priviliges.\n");
         }
-
-        /* Fifth, reset caps flag */
-        if (prctl(PR_SET_KEEPCAPS, 0) < 0) {
-                r = -errno;
-                fprintf(stderr, "PR_SET_KEEPCAPS failed: %s\n", strerror(errno));
-                return r;
-        }
-
-        /* Sixth, reduce caps */
-        assert_se(caps = cap_init());
-        assert_se(cap_clear(caps) == 0);
-        assert_se(cap_set_flag(caps, CAP_EFFECTIVE, ELEMENTSOF(cap_values), cap_values, CAP_SET) == 0);
-        assert_se(cap_set_flag(caps, CAP_PERMITTED, ELEMENTSOF(cap_values), cap_values, CAP_SET) == 0);
-
-        if (cap_set_proc(caps) < 0) {
-                r = -errno;
-                fprintf(stderr, "cap_set_proc() failed: %s\n", strerror(errno));
-                return r;
-        }
-
-        assert_se(cap_free(caps) == 0);
-
-        /* Seventh, update environment */
-        setenv("USER", USERNAME, 1);
-        setenv("USERNAME", USERNAME, 1);
-        setenv("LOGNAME", USERNAME, 1);
-        setenv("HOME", get_proc_path(), 1);
-
-        fprintf(stderr, "Sucessfully dropped priviliges.\n");
 
         return 0;
 }
 
 static int set_resource_limits(void) {
 
-        static const struct {
+        static struct {
                 int id;
                 const char *name;
                 rlim_t value;
@@ -1163,11 +1194,17 @@ static int set_resource_limits(void) {
                 { .id = RLIMIT_NOFILE,   .name = "RLIMIT_NOFILE",   .value = 50 },
                 { .id = RLIMIT_NPROC,    .name = "RLIMIT_NPROC",    .value =  1 },
                 { .id = RLIMIT_RTPRIO,   .name = "RLIMIT_RTPRIO",   .value =  0 }, /* Since we have CAP_SYS_NICE we don't need this */
-                { .id = RLIMIT_RTTIME,   .name = "RLIMIT_RTTIME",   .value = RTKIT_RTTIME_MAX_NS } /* Do as I say AND do as I do */
+                { .id = RLIMIT_RTTIME,   .name = "RLIMIT_RTTIME",   .value =  0 }
         };
 
         unsigned u;
         int r;
+
+        assert(table[7].id == RLIMIT_RTTIME);
+        table[7].value = rttime_ns_max; /* Do as I say AND do as I do */
+
+        if (!do_limit_resources)
+                return 0;
 
         for (u = 0; u < ELEMENTSOF(table); u++) {
                 struct rlimit rlim;
@@ -1190,13 +1227,300 @@ static int set_resource_limits(void) {
                 }
         }
 
+        fprintf(stderr, "Sucessfully limited resources.\n");
+
         return 0;
+}
+
+enum {
+        ARG_HELP = 256,
+        ARG_VERSION,
+        ARG_OUR_REALTIME_PRIORITY,
+        ARG_OUR_NICE_LEVEL,
+        ARG_MAX_REALTIME_PRIORITY,
+        ARG_MIN_NICE_LEVEL,
+        ARG_USER_NAME,
+        ARG_RTTIME_NS_MAX,
+        ARG_USERS_MAX,
+        ARG_PROCESSES_PER_USER_MAX,
+        ARG_THREADS_PER_USER_MAX,
+        ARG_ACTIONS_BURST_SEC,
+        ARG_ACTIONS_PER_BURST_MAX,
+        ARG_NO_DROP_PRIVILIGES,
+        ARG_NO_CHROOT,
+        ARG_NO_LIMIT_RESOURCES,
+};
+
+/* Table for getopt_long() */
+static const struct option long_options[] = {
+    { "help",                        no_argument,       0, ARG_HELP },
+    { "version",                     no_argument,       0, ARG_VERSION},
+    { "our-realtime-priority",       required_argument, 0, ARG_OUR_REALTIME_PRIORITY },
+    { "our-nice-level",              required_argument, 0, ARG_OUR_NICE_LEVEL },
+    { "max-realtime-priority",       required_argument, 0, ARG_MAX_REALTIME_PRIORITY },
+    { "min-nice-level",              required_argument, 0, ARG_MIN_NICE_LEVEL },
+    { "user-name",                   required_argument, 0, ARG_USER_NAME },
+    { "rttime-ns-max",               required_argument, 0, ARG_RTTIME_NS_MAX },
+    { "users-max",                   required_argument, 0, ARG_USERS_MAX },
+    { "processes-per-user-max",      required_argument, 0, ARG_PROCESSES_PER_USER_MAX },
+    { "threads-per-user-max",        required_argument, 0, ARG_THREADS_PER_USER_MAX },
+    { "actions-burst-sec",           required_argument, 0, ARG_ACTIONS_BURST_SEC },
+    { "actions-per-burst-max",       required_argument, 0, ARG_ACTIONS_PER_BURST_MAX },
+    { "no-drop-priviliges",          no_argument,       0, ARG_NO_DROP_PRIVILIGES },
+    { "no-chroot",                   no_argument,       0, ARG_NO_CHROOT },
+    { "no-limit-resources",          no_argument,       0, ARG_NO_LIMIT_RESOURCES },
+    { NULL, 0, 0, 0}
+};
+
+static char* get_file_name(const char *p) {
+        char *e;
+
+        if ((e = strrchr(p, '/')))
+                return e + 1;
+        else
+                return (char*) p;
+}
+
+static void show_help(const char *exe) {
+
+        printf("%s [options]\n\n"
+               "COMMANDS:\n"
+               "  -h, --help                          Show this help\n"
+               "      --version                       Show version\n\n"
+               "OPTIONS:\n"
+               "      --our-realtime-priority=[%i..%i] Realtime priority for the daemon (%u)\n"
+               "      --our-nice-level=[%i..%i]      Nice level for the daemon (%i)\n"
+               "      --max-realtime-priority=[%i..%i] Max realtime priority for clients (%u)\n"
+               "      --min-nice-level=[%i..%i]      Min nice level for clients (%i)\n"
+               "      --user-name=USER                Run daemon as user (%s)\n"
+               "      --rttime-ns-max=NSEC            Require clients to have set RLIMIT_RTTIME\n"
+               "                                      not greater than this (%llu)\n"
+               "      --users-max=INT                 How many users this daemon will serve at\n"
+               "                                      max at the same time (%u)\n"
+               "      --processes-per-user-max=INT    How many processes this daemon will serve\n"
+               "                                      at max per user at the same time (%u)\n"
+               "      --threads-per-user-max=INT      How many threads this daemon will serve\n"
+               "                                      at max per user at the same time (%u)\n"
+               "      --actions-burst-sec=SEC         Enforce requests limits in this time (%u)\n"
+               "      --actions-per-burst-max=INT     Allow this many requests per burst (%u)\n"
+               "      --no-drop-priviliges            Don't drop priviliges\n"
+               "      --no-chroot                     Don't chroot\n"
+               "      --no-limit-resources            Don't limit daemon's resources\n",
+               exe,
+               sched_get_priority_min(SCHED_RR), sched_get_priority_max(SCHED_RR), our_realtime_priority,
+               PRIO_MIN, PRIO_MAX-1, our_nice_level,
+               sched_get_priority_min(SCHED_RR), sched_get_priority_max(SCHED_RR), max_realtime_priority,
+               PRIO_MIN, PRIO_MAX-1, min_nice_level,
+               username,
+               rttime_ns_max,
+               users_max,
+               processes_per_user_max,
+               threads_per_user_max,
+               actions_burst_sec,
+               actions_per_burst_max);
+}
+
+static int parse_command_line(int argc, char *argv[], int *ret) {
+
+        int c;
+
+        while ((c = getopt_long(argc, argv, "h", long_options, NULL)) >= 0) {
+
+                switch (c) {
+                        case 'h':
+                        case ARG_HELP:
+                                show_help(get_file_name(argv[0]));
+                                *ret = 0;
+                                return 0;
+
+                        case ARG_VERSION:
+                                printf("%s 0.1\n", get_file_name(argv[0]));
+                                *ret = 0;
+                                return 0;
+
+                        case ARG_USER_NAME:
+                                username = optarg;
+                                break;
+
+                        case ARG_OUR_REALTIME_PRIORITY: {
+                                char *e = NULL;
+                                unsigned long u;
+
+                                errno = 0;
+                                u = strtoul(optarg, &e, 0);
+                                if (errno != 0 || !e || *e || u < (unsigned) sched_get_priority_min(SCHED_RR) || u > (unsigned) sched_get_priority_max(SCHED_RR)) {
+                                        fprintf(stderr, "--our-realtime-priority parameter invalid.\n");
+                                        return -1;
+                                }
+                                our_realtime_priority = u;
+                                break;
+                        }
+
+                        case ARG_OUR_NICE_LEVEL: {
+                                char *e = NULL;
+                                long i;
+
+                                errno = 0;
+                                i = strtol(optarg, &e, 0);
+                                if (errno != 0 || !e || *e || i < PRIO_MIN || i > PRIO_MAX*2) {
+                                        fprintf(stderr, "--our-nice-level parameter invalid.\n");
+                                        return -1;
+                                }
+                                our_nice_level = i;
+                                break;
+                        }
+
+                        case ARG_MAX_REALTIME_PRIORITY: {
+                                char *e = NULL;
+                                unsigned long u;
+
+                                errno = 0;
+                                u = strtoul(optarg, &e, 0);
+                                if (errno != 0 || !e || *e || u < (unsigned) sched_get_priority_min(SCHED_RR) || u > (unsigned) sched_get_priority_max(SCHED_RR)) {
+                                        fprintf(stderr, "--max-realtime-priority parameter invalid.\n");
+                                        return -1;
+                                }
+                                max_realtime_priority = u;
+                                break;
+                        }
+
+                        case ARG_MIN_NICE_LEVEL: {
+                                char *e = NULL;
+                                long i;
+
+                                errno = 0;
+                                i = strtol(optarg, &e, 0);
+                                if (errno != 0 || !e || *e || i < PRIO_MIN || i >= PRIO_MAX) {
+                                        fprintf(stderr, "--min-nice-level parameter invalid.\n");
+                                        return -1;
+                                }
+                                min_nice_level = i;
+                                break;
+                        }
+
+                        case ARG_RTTIME_NS_MAX: {
+                                char *e = NULL;
+
+                                errno = 0;
+                                rttime_ns_max = strtoull(optarg, &e, 0);
+                                if (errno != 0 || !e || *e || rttime_ns_max <= 0) {
+                                        fprintf(stderr, "--rttime-ns-max parameter invalid.\n");
+                                        return -1;
+                                }
+                                break;
+                        }
+
+                        case ARG_USERS_MAX: {
+                                char *e = NULL;
+                                unsigned long u;
+
+                                errno = 0;
+                                u = strtoul(optarg, &e, 0);
+                                if (errno != 0 || !e || *e || u <= 0) {
+                                        fprintf(stderr, "--users-max parameter invalid.\n");
+                                        return -1;
+                                }
+                                users_max = u;
+                                break;
+                        }
+
+                        case ARG_PROCESSES_PER_USER_MAX: {
+                                char *e = NULL;
+                                unsigned long u;
+
+                                errno = 0;
+                                u = strtoul(optarg, &e, 0);
+                                if (errno != 0 || !e || *e || u <= 0) {
+                                        fprintf(stderr, "--processes-per-user-max parameter invalid.\n");
+                                        return -1;
+                                }
+                                processes_per_user_max = u;
+                                break;
+                        }
+
+                        case ARG_THREADS_PER_USER_MAX: {
+                                char *e = NULL;
+                                unsigned long u;
+
+                                errno = 0;
+                                u = strtoul(optarg, &e, 0);
+                                if (errno != 0 || !e || *e || u <= 0) {
+                                        fprintf(stderr, "--threads-per-user-max parameter invalid.\n");
+                                        return -1;
+                                }
+                                threads_per_user_max = u;
+                                break;
+                        }
+
+                        case ARG_ACTIONS_BURST_SEC: {
+                                char *e = NULL;
+                                unsigned long u;
+
+                                errno = 0;
+                                u = strtoul(optarg, &e, 0);
+                                if (errno != 0 || !e || *e || u <= 0) {
+                                        fprintf(stderr, "--actions-burst-sec parameter invalid.\n");
+                                        return -1;
+                                }
+                                actions_burst_sec = u;
+                                break;
+                        }
+
+                        case ARG_ACTIONS_PER_BURST_MAX: {
+                                char *e = NULL;
+                                unsigned long u;
+
+                                errno = 0;
+                                u = strtoul(optarg, &e, 0);
+                                if (errno != 0 || !e || *e || u <= 0) {
+                                        fprintf(stderr, "--actions-per-burst-max parameter invalid.\n");
+                                        return -1;
+                                }
+                                actions_per_burst_max = u;
+                                break;
+                        }
+
+                        case ARG_NO_DROP_PRIVILIGES:
+                                do_drop_priviliges = FALSE;
+                                break;
+
+                        case ARG_NO_CHROOT:
+                                do_chroot = FALSE;
+                                break;
+
+                        case ARG_NO_LIMIT_RESOURCES:
+                                do_limit_resources = FALSE;
+                                break;
+
+                        case '?':
+                        default:
+                                fprintf(stderr, "Unknown command.\n");
+                                return -1;
+                }
+        }
+
+        if (optind < argc) {
+                fprintf(stderr, "Too many arguments.\n");
+                return -1;
+        }
+
+        if (max_realtime_priority >= our_realtime_priority) {
+                fprintf(stderr, "The maximum realtime priority (%u) handed out to clients cannot be higher then our own (%u).\n",
+                        max_realtime_priority,
+                        our_realtime_priority);
+                return -1;
+        }
+
+        return 1;
 }
 
 int main(int argc, char *argv[]) {
         DBusConnection *bus = NULL;
         int ret = 1;
         struct user *u;
+
+        if (parse_command_line(argc, argv, &ret) <= 0)
+                goto finish;
 
         if (getuid() != 0) {
                 fprintf(stderr, "Need to be run as root.\n");

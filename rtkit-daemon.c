@@ -40,6 +40,11 @@
 #include <time.h>
 #include <assert.h>
 #include <getopt.h>
+#include <signal.h>
+#include <sys/poll.h>
+#include <sys/eventfd.h>
+#include <pthread.h>
+#include <dirent.h>
 
 #include "rtkit.h"
 
@@ -68,6 +73,7 @@
         "   <arg name=\"thread\" type=\"t\" direction=\"in\"/>"         \
         "   <arg name=\"priority\" type=\"i\" direction=\"in\"/>"       \
         "  </method>"                                                   \
+        "  <method name=\"ResetKnown\"/>"                               \
         "  <method name=\"ResetAll\"/>"                                 \
         "  <method name=\"Exit\"/>"                                     \
         " </interface>"                                                 \
@@ -89,6 +95,8 @@
 
 #define ELEMENTSOF(x) (sizeof(x)/sizeof(x[0]))
 
+#define TIMESPEC_MSEC(ts) (((int64_t) (ts).tv_sec * 1000LL) + ((int64_t) (ts).tv_nsec / 1000000LL))
+
 /* If we actually execute a request we temporarily upgrade our realtime priority to this level */
 static unsigned our_realtime_priority = 30;
 
@@ -105,7 +113,7 @@ static int min_nice_level = -15;
 static const char *username = "rtkit";
 
 /* Enforce that clients have RLIMIT_RTTIME set to a value <= this */
-static unsigned long long rttime_ns_max = 200000000ULL; /* 200 ms */
+static unsigned long long rttime_nsec_max = 200000000ULL; /* 200 ms */
 
 /* How many users do we supervise at max? */
 static unsigned users_max = 2048;
@@ -130,6 +138,21 @@ static bool do_chroot = TRUE;
 
 /* Limit resources */
 static bool do_limit_resources = TRUE;
+
+/* Run a canary watchdog */
+static bool do_canary = TRUE;
+
+/* Canary cheep interval */
+static unsigned canary_cheep_msec = 5000; /* 5s */
+
+/* Canary watchdog interval */
+static unsigned canary_watchdog_msec = 10000; /* 10s */
+
+/* Watchdog realtime priority */
+static unsigned canary_watchdog_realtime_priority = 99;
+
+/* Demote root processes? */
+static bool canary_demote_root = FALSE;
 
 struct thread {
         /* We use the thread id plus its starttime as a unique identifier for threads */
@@ -166,6 +189,8 @@ static unsigned n_users = 0;
 static unsigned n_total_processes = 0;
 static unsigned n_total_threads = 0;
 static const char *proc = NULL;
+static int quit_fd = -1, canary_fd = -1;
+static pthread_t canary_thread_id = 0, watchdog_thread_id = 0;
 
 static const char *get_proc_path(void) {
         /* Useful for chroot environments */
@@ -518,12 +543,12 @@ static bool startswith(const char *s, const char *prefix) {
         return strncmp(s, prefix, strlen(prefix)) == 0;
 }
 
-static int self_set_realtime(void) {
+static int self_set_realtime(unsigned priority) {
         struct sched_param param;
         int r;
 
         memset(&param, 0, sizeof(param));
-        param.sched_priority = our_realtime_priority;
+        param.sched_priority = priority;
 
         if (sched_setscheduler(0, SCHED_RR|SCHED_RESET_ON_FORK, &param) < 0) {
                 r = -errno;
@@ -537,7 +562,7 @@ finish:
         return r;
 }
 
-static void self_drop_realtime(void) {
+static void self_drop_realtime(int nice_level) {
         struct sched_param param;
 
         memset(&param, 0, sizeof(param));
@@ -545,7 +570,7 @@ static void self_drop_realtime(void) {
         if (sched_setscheduler(0, SCHED_OTHER, &param) < 0)
                 fprintf(stderr, "Warning: Failed to reset scheduling to SCHED_OTHER: %s\n", strerror(errno));
 
-        if (setpriority(PRIO_PROCESS, 0, our_nice_level) < 0)
+        if (setpriority(PRIO_PROCESS, 0, nice_level) < 0)
                 fprintf(stderr, "Warning: Failed to reset nice level to %u: %s\n", our_nice_level, strerror(errno));
 }
 
@@ -588,7 +613,7 @@ static int verify_process_rttime(struct process *p) {
                 if (errno != 0 || !e || *e != 0)
                         break;
 
-                if (rttime <= rttime_ns_max)
+                if (rttime <= rttime_nsec_max)
                         good = true;
 
                 break;
@@ -650,19 +675,26 @@ static int verify_thread_starttime(struct process *p, struct thread *t) {
         return st == t->starttime ? 0 : -EPERM;
 }
 
-static void thread_reset(struct thread *t) {
+static int thread_reset(pid_t tid) {
         struct sched_param param;
+        int r = 0;
 
         memset(&param, 0, sizeof(param));
         param.sched_priority = 0;
 
-        if (sched_setscheduler(t->pid, SCHED_OTHER, &param) < 0)
+        if (sched_setscheduler(tid, SCHED_OTHER, &param) < 0) {
                 if (errno != ESRCH)
-                        fprintf(stderr, "Warning: Failed to reset scheduling to SCHED_OTHER for thread %llu: %s\n", (unsigned long long) t->pid, strerror(errno));
+                        fprintf(stderr, "Warning: Failed to reset scheduling to SCHED_OTHER for thread %llu: %s\n", (unsigned long long) tid, strerror(errno));
+                r = -1;
+        }
 
-        if (setpriority(PRIO_PROCESS, t->pid, 0) < 0)
+        if (setpriority(PRIO_PROCESS, tid, 0) < 0) {
                 if (errno != ESRCH)
-                        fprintf(stderr, "Warning: Failed to reset nice level to 0 for thread %llu: %s\n", (unsigned long long) t->pid, strerror(errno));
+                        fprintf(stderr, "Warning: Failed to reset nice level to 0 for thread %llu: %s\n", (unsigned long long) tid, strerror(errno));
+                r = -1;
+        }
+
+        return r;
 }
 
 static char* get_exe_name(pid_t pid, char *exe, size_t len) {
@@ -704,7 +736,7 @@ static int process_set_realtime(struct user *u, struct process *p, struct thread
          * sure that our verification code is not preempted by an evil
          * client's code which might have gotten SCHED_RR through
          * us. */
-        if ((r = self_set_realtime()) < 0)
+        if ((r = self_set_realtime(our_realtime_priority)) < 0)
                 return r;
 
         /* Let's make sure that everything is alright before we make
@@ -732,7 +764,7 @@ static int process_set_realtime(struct user *u, struct process *p, struct thread
             (r = verify_process_starttime(p)) < 0 ||
             (r = verify_process_user(u, p)) < 0) {
 
-                thread_reset(t);
+                thread_reset(t->pid);
                 goto finish;
         }
 
@@ -746,7 +778,7 @@ static int process_set_realtime(struct user *u, struct process *p, struct thread
         r = 0;
 
 finish:
-        self_drop_realtime();
+        self_drop_realtime(our_nice_level);
 
         return r;
 }
@@ -767,7 +799,7 @@ static int process_set_high_priority(struct user *u, struct process *p, struct t
                 return -EBUSY;
 
         /* Temporarily become a realtime process */
-        if ((r = self_set_realtime()) < 0)
+        if ((r = self_set_realtime(our_realtime_priority)) < 0)
                 return r;
 
         /* Let's make sure that everything is alright before we make
@@ -796,7 +828,7 @@ static int process_set_high_priority(struct user *u, struct process *p, struct t
             (r = verify_process_starttime(p)) < 0 ||
             (r = verify_process_user(u, p)) < 0) {
 
-                thread_reset(t);
+                thread_reset(t->pid);
                 goto finish;
         }
 
@@ -810,12 +842,12 @@ static int process_set_high_priority(struct user *u, struct process *p, struct t
         r = 0;
 
 finish:
-        self_drop_realtime();
+        self_drop_realtime(our_nice_level);
 
         return r;
 }
 
-static void reset_all(void) {
+static void reset_known(void) {
         struct user *u;
         struct process *p;
         struct thread *t;
@@ -826,7 +858,111 @@ static void reset_all(void) {
                                 if (verify_process_user(u, p) >= 0 &&
                                     verify_process_starttime(p) >= 0 &&
                                     verify_thread_starttime(p, t) >= 0)
-                                        thread_reset(t);
+                                        thread_reset(t->pid);
+}
+
+static int reset_all(void) {
+        DIR *pd;
+        int r;
+        unsigned n_demoted = 0;
+
+        /* Goes through /proc and demotes *all* threads to
+         * SCHED_OTHER */
+
+        fprintf(stderr, "Rampaging.\n");
+
+        if (!(pd = opendir(get_proc_path()))) {
+                r = -errno;
+                fprintf(stderr, "opendir(%s) failed: %s\n", get_proc_path(), strerror(errno));
+                return r;
+        }
+
+        for (;;) {
+                const struct dirent *pde;
+                char *e = NULL;
+                unsigned long long pid;
+                char fn[128];
+                DIR *td;
+                struct stat st;
+
+                if (!(pde = readdir(pd)))
+                        break;
+
+                if (!(pde->d_type & DT_DIR))
+                        continue;
+
+                errno = 0;
+                pid = strtoull(pde->d_name, &e, 10);
+                if (errno != 0 || !e || *e != 0)
+                        continue;
+
+                if ((pid_t) pid == getpid() ||
+                    pid == 1)
+                        continue;
+
+                assert_se(snprintf(fn, sizeof(fn)-1, "%s/%llu", get_proc_path(), pid) < (int) (sizeof(fn)-1));
+                fn[sizeof(fn)-1] = 0;
+
+                if (stat(fn, &st) < 0) {
+                        fprintf(stderr, "Warning: stat(%s) failed: %s\n", fn, strerror(errno));
+                        continue;
+                }
+
+                if (!S_ISDIR(st.st_mode))
+                        continue;
+
+                if (!canary_demote_root && st.st_uid == 0)
+                        continue;
+
+                assert_se(snprintf(fn, sizeof(fn)-1, "%s/%llu/task", get_proc_path(), pid) < (int) (sizeof(fn)-1));
+                fn[sizeof(fn)-1] = 0;
+
+                if (!(td = opendir(fn)))
+                        continue;
+
+                for (;;) {
+                        const struct dirent *tde;
+                        unsigned long long tid;
+                        int r;
+
+                        if (!(tde = readdir(td)))
+                                break;
+
+                        if (!(tde->d_type & DT_DIR))
+                                continue;
+
+                        e = NULL;
+                        errno = 0;
+                        tid = strtoull(tde->d_name, &e, 10);
+                        if (errno != 0 || !e || *e != 0)
+                                continue;
+
+                        if ((r = sched_getscheduler(tid)) < 0) {
+                                if (errno != ESRCH)
+                                        fprintf(stderr, "Warning: sched_getscheduler() failed: %s\n", strerror(errno));
+                                continue;
+                        }
+
+                        if (r == SCHED_FIFO || r == SCHED_RR ||
+                            r == (SCHED_FIFO|SCHED_RESET_ON_FORK) || r == (SCHED_RR|SCHED_RESET_ON_FORK))
+                                if (thread_reset((pid_t) tid) >= 0) {
+                                        char exe[64];
+                                        fprintf(stderr, "Successfully demoted thread %llu of process %llu (%s).\n",
+                                                (unsigned long long) tid,
+                                                (unsigned long long) pid,
+                                                get_exe_name(pid, exe, sizeof(exe)));
+                                        n_demoted++;
+                                }
+                }
+
+                closedir(td);
+        }
+
+        closedir(pd);
+
+        fprintf(stderr, "Demoted %u threads.\n", n_demoted);
+
+        return 0;
 }
 
 /* This mimics dbus_bus_get_unix_user() */
@@ -1032,6 +1168,12 @@ static DBusHandlerResult dbus_handler(DBusConnection *c, DBusMessage *m, void *u
                 user_gc();
                 assert_se(r = dbus_message_new_method_return(m));
 
+        } else if (dbus_message_is_method_call(m, "org.freedesktop.RealtimeKit1", "ResetKnown")) {
+
+                reset_known();
+                user_gc();
+                assert_se(r = dbus_message_new_method_return(m));
+
         } else if (dbus_message_is_method_call(m, "org.freedesktop.RealtimeKit1", "Exit")) {
 
                 assert_se(r = dbus_message_new_method_return(m));
@@ -1095,6 +1237,212 @@ static int setup_dbus(DBusConnection **c) {
 fail:
         dbus_error_free(&error);
         return -EIO;
+}
+
+
+static void block_all_signals(void) {
+        sigset_t set;
+
+        assert_se(sigfillset(&set) == 0);
+        assert_se(pthread_sigmask(SIG_BLOCK, &set, NULL) == 0);
+}
+
+static void* canary_thread(void *data) {
+        struct timespec last_cheep, now;
+        struct pollfd pollfd;
+
+        assert(canary_fd >= 0);
+        assert(quit_fd >= 0);
+
+        /* Make sure we are not disturbed by any signal */
+        block_all_signals();
+        self_drop_realtime(0);
+
+        memset(&pollfd, 0, sizeof(pollfd));
+        pollfd.fd = quit_fd;
+        pollfd.events = POLLIN;
+
+        assert_se(clock_gettime(CLOCK_MONOTONIC, &now) == 0);
+        last_cheep = now;
+
+        fprintf(stderr, "Canary thread running.\n");
+
+        for (;;) {
+                int r;
+                int64_t msec;
+
+                msec = TIMESPEC_MSEC(last_cheep) + canary_cheep_msec - TIMESPEC_MSEC(now);
+
+                if (msec < 0)
+                        msec = 0;
+
+                r = poll(&pollfd, 1, (int) msec);
+
+                assert_se(clock_gettime(CLOCK_MONOTONIC, &now) == 0);
+
+                if (r < 0) {
+                        if (errno == EINTR || errno == EAGAIN)
+                                continue;
+
+                        fprintf(stderr, "poll() failed: %s\n", strerror(errno));
+                        break;
+                }
+
+                if (pollfd.revents) {
+                        fprintf(stderr, "Exiting canary thread.\n");
+                        break;
+                }
+
+                if (TIMESPEC_MSEC(last_cheep) + canary_cheep_msec <= TIMESPEC_MSEC(now)) {
+                        eventfd_t value = 1;
+
+                        if (eventfd_write(canary_fd, value) < 0) {
+                                fprintf(stderr, "eventfd_write() failed: %s\n", strerror(errno));
+                                break;
+                        }
+
+                        last_cheep = now;
+                        fprintf(stderr, "Sent cheep\n");
+                        continue;
+                }
+        }
+
+        return NULL;
+}
+
+static void* watchdog_thread(void *data) {
+        enum {
+                POLLFD_CANARY,
+                POLLFD_QUIT,
+                POLLFD_MAX
+        };
+        struct timespec last_cheep, now;
+        struct pollfd pollfd[POLLFD_MAX];
+
+        assert(canary_fd >= 0);
+        assert(quit_fd >= 0);
+
+        /* Make sure we are not disturbed by any signal */
+        block_all_signals();
+        self_set_realtime(canary_watchdog_realtime_priority);
+
+        memset(pollfd, 0, sizeof(pollfd));
+        pollfd[POLLFD_CANARY].fd = canary_fd;
+        pollfd[POLLFD_CANARY].events = POLLIN;
+        pollfd[POLLFD_QUIT].fd = quit_fd;
+        pollfd[POLLFD_QUIT].events = POLLIN;
+
+        assert_se(clock_gettime(CLOCK_MONOTONIC, &now) == 0);
+        last_cheep = now;
+
+        fprintf(stderr, "Watchdog thread running.\n");
+
+        for (;;) {
+                int r;
+                int64_t msec;
+
+                msec = TIMESPEC_MSEC(last_cheep) + canary_watchdog_msec - TIMESPEC_MSEC(now);
+
+                if (msec < 0)
+                        msec = 0;
+
+                r = poll(pollfd, POLLFD_MAX, (int) msec);
+
+                assert_se(clock_gettime(CLOCK_MONOTONIC, &now) == 0);
+
+                if (r < 0) {
+                        if (errno == EINTR || errno == EAGAIN)
+                                continue;
+
+                        fprintf(stderr, "poll() failed: %s\n", strerror(errno));
+                        break;
+                }
+
+                if (pollfd[POLLFD_QUIT].revents) {
+                        fprintf(stderr, "Exiting watchdog thread.\n");
+                        break;
+                }
+
+                if (pollfd[POLLFD_CANARY].revents) {
+                        eventfd_t value;
+
+                        if (eventfd_read(canary_fd, &value) < 0) {
+                                fprintf(stderr, "eventfd_read() failed: %s\n", strerror(errno));
+                                break;
+                        }
+
+                        last_cheep = now;
+                        fprintf(stderr, "Recieved cheep\n");
+                        continue;
+                }
+
+                if (TIMESPEC_MSEC(last_cheep) + canary_watchdog_msec <= TIMESPEC_MSEC(now)) {
+                        last_cheep = now;
+                        fprintf(stderr, "The poor little canary died! Taking action.\n");
+                        reset_all();
+                        continue;
+                }
+        }
+
+        return NULL;
+}
+
+static void stop_canary(void) {
+        int r;
+
+        if (quit_fd >= 0) {
+                eventfd_t value = 1;
+                if (eventfd_write(quit_fd, value) < 0)
+                        fprintf(stderr, "Warning: eventfd_write() failed: %s\n", strerror(errno));
+        }
+
+        if (canary_thread_id != 0) {
+                if ((r = pthread_join(canary_thread_id, NULL)) != 0)
+                        fprintf(stderr, "Warning: pthread_join() failed: %s\n", strerror(r));
+                canary_thread_id = 0;
+        }
+
+        if (watchdog_thread_id != 0) {
+                if ((r = pthread_join(watchdog_thread_id, NULL)) != 0)
+                        fprintf(stderr, "Warning: pthread_join() failed: %s\n", strerror(r));
+                watchdog_thread_id = 0;
+        }
+
+        if (canary_fd < 0) {
+                close(canary_fd);
+                canary_fd = -1;
+        }
+
+        if (quit_fd < 0) {
+                close(quit_fd);
+                quit_fd = -1;
+        }
+}
+
+static int start_canary(void) {
+        int r;
+
+        if (!do_canary)
+                return 0;
+
+        if ((canary_fd = eventfd(0, EFD_NONBLOCK|EFD_CLOEXEC)) < 0 ||
+            (quit_fd = eventfd(0, EFD_NONBLOCK|EFD_CLOEXEC)) < 0) {
+                r = -errno;
+                fprintf(stderr, "eventfd() failed: %s\n", strerror(errno));
+                goto fail;
+        }
+
+        if ((r = -pthread_create(&canary_thread_id, NULL, canary_thread, NULL)) < 0 ||
+            (r = -pthread_create(&watchdog_thread_id, NULL, watchdog_thread, NULL)) < 0) {
+                fprintf(stderr, "pthread_create failed: %s\n", strerror(-r));
+                goto fail;
+        }
+
+        return 0;
+
+fail:
+        stop_canary();
+        return r;
 }
 
 static int drop_privileges(void) {
@@ -1192,7 +1540,7 @@ static int set_resource_limits(void) {
                 { .id = RLIMIT_MSGQUEUE, .name = "RLIMIT_MSGQUEUE", .value =  0 },
                 { .id = RLIMIT_NICE,     .name = "RLIMIT_NICE",     .value = 20 },
                 { .id = RLIMIT_NOFILE,   .name = "RLIMIT_NOFILE",   .value = 50 },
-                { .id = RLIMIT_NPROC,    .name = "RLIMIT_NPROC",    .value =  1 },
+                { .id = RLIMIT_NPROC,    .name = "RLIMIT_NPROC",    .value =  3 },
                 { .id = RLIMIT_RTPRIO,   .name = "RLIMIT_RTPRIO",   .value =  0 }, /* Since we have CAP_SYS_NICE we don't need this */
                 { .id = RLIMIT_RTTIME,   .name = "RLIMIT_RTTIME",   .value =  0 }
         };
@@ -1201,7 +1549,7 @@ static int set_resource_limits(void) {
         int r;
 
         assert(table[7].id == RLIMIT_RTTIME);
-        table[7].value = rttime_ns_max; /* Do as I say AND do as I do */
+        table[7].value = rttime_nsec_max; /* Do as I say AND do as I do */
 
         if (!do_limit_resources)
                 return 0;
@@ -1240,7 +1588,7 @@ enum {
         ARG_MAX_REALTIME_PRIORITY,
         ARG_MIN_NICE_LEVEL,
         ARG_USER_NAME,
-        ARG_RTTIME_NS_MAX,
+        ARG_RTTIME_NSEC_MAX,
         ARG_USERS_MAX,
         ARG_PROCESSES_PER_USER_MAX,
         ARG_THREADS_PER_USER_MAX,
@@ -1249,6 +1597,10 @@ enum {
         ARG_NO_DROP_PRIVILEGES,
         ARG_NO_CHROOT,
         ARG_NO_LIMIT_RESOURCES,
+        ARG_NO_CANARY,
+        ARG_CANARY_CHEEP_MSEC,
+        ARG_CANARY_WATCHDOG_MSEC,
+        ARG_CANARY_DEMOTE_ROOT
 };
 
 /* Table for getopt_long() */
@@ -1260,7 +1612,7 @@ static const struct option long_options[] = {
     { "max-realtime-priority",       required_argument, 0, ARG_MAX_REALTIME_PRIORITY },
     { "min-nice-level",              required_argument, 0, ARG_MIN_NICE_LEVEL },
     { "user-name",                   required_argument, 0, ARG_USER_NAME },
-    { "rttime-ns-max",               required_argument, 0, ARG_RTTIME_NS_MAX },
+    { "rttime-nsec-max",             required_argument, 0, ARG_RTTIME_NSEC_MAX },
     { "users-max",                   required_argument, 0, ARG_USERS_MAX },
     { "processes-per-user-max",      required_argument, 0, ARG_PROCESSES_PER_USER_MAX },
     { "threads-per-user-max",        required_argument, 0, ARG_THREADS_PER_USER_MAX },
@@ -1269,6 +1621,10 @@ static const struct option long_options[] = {
     { "no-drop-privileges",          no_argument,       0, ARG_NO_DROP_PRIVILEGES },
     { "no-chroot",                   no_argument,       0, ARG_NO_CHROOT },
     { "no-limit-resources",          no_argument,       0, ARG_NO_LIMIT_RESOURCES },
+    { "no-canary",                   no_argument,       0, ARG_NO_CANARY },
+    { "canary-cheep-msec",           required_argument, 0, ARG_CANARY_CHEEP_MSEC },
+    { "canary-watchdog-msec",        required_argument, 0, ARG_CANARY_WATCHDOG_MSEC },
+    { "canary-demote-root",          no_argument,       0, ARG_CANARY_DEMOTE_ROOT },
     { NULL, 0, 0, 0}
 };
 
@@ -1291,18 +1647,22 @@ static void show_help(const char *exe) {
                "      --our-realtime-priority=[%i..%i] Realtime priority for the daemon (%u)\n"
                "      --our-nice-level=[%i..%i]      Nice level for the daemon (%i)\n"
                "      --max-realtime-priority=[%i..%i] Max realtime priority for clients (%u)\n"
-               "      --min-nice-level=[%i..%i]      Min nice level for clients (%i)\n"
-               "      --user-name=USER                Run daemon as user (%s)\n"
-               "      --rttime-ns-max=NSEC            Require clients to have set RLIMIT_RTTIME\n"
+               "      --min-nice-level=[%i..%i]      Min nice level for clients (%i)\n\n"
+               "      --user-name=USER                Run daemon as user (%s)\n\n"
+               "      --rttime-nsec-max=NSEC          Require clients to have set RLIMIT_RTTIME\n\n"
                "                                      not greater than this (%llu)\n"
                "      --users-max=INT                 How many users this daemon will serve at\n"
                "                                      max at the same time (%u)\n"
                "      --processes-per-user-max=INT    How many processes this daemon will serve\n"
                "                                      at max per user at the same time (%u)\n"
                "      --threads-per-user-max=INT      How many threads this daemon will serve\n"
-               "                                      at max per user at the same time (%u)\n"
+               "                                      at max per user at the same time (%u)\n\n"
                "      --actions-burst-sec=SEC         Enforce requests limits in this time (%u)\n"
-               "      --actions-per-burst-max=INT     Allow this many requests per burst (%u)\n"
+               "      --actions-per-burst-max=INT     Allow this many requests per burst (%u)\n\n"
+               "      --canary-cheep-msec=MSEC        Canary cheep interval (%u)\n"
+               "      --canary-watchdog-msec=MSEC     Watchdog action delay (%u)\n"
+               "      --canary-demote-root            When the canary dies demote root processes?\n\n"
+               "      --no-canary                     Don't run a canary-based RT watchdog\n\n"
                "      --no-drop-privileges            Don't drop privileges\n"
                "      --no-chroot                     Don't chroot\n"
                "      --no-limit-resources            Don't limit daemon's resources\n",
@@ -1312,12 +1672,14 @@ static void show_help(const char *exe) {
                sched_get_priority_min(SCHED_RR), sched_get_priority_max(SCHED_RR), max_realtime_priority,
                PRIO_MIN, PRIO_MAX-1, min_nice_level,
                username,
-               rttime_ns_max,
+               rttime_nsec_max,
                users_max,
                processes_per_user_max,
                threads_per_user_max,
                actions_burst_sec,
-               actions_per_burst_max);
+               actions_per_burst_max,
+               canary_cheep_msec,
+               canary_watchdog_msec);
 }
 
 static int parse_command_line(int argc, char *argv[], int *ret) {
@@ -1398,13 +1760,13 @@ static int parse_command_line(int argc, char *argv[], int *ret) {
                                 break;
                         }
 
-                        case ARG_RTTIME_NS_MAX: {
+                        case ARG_RTTIME_NSEC_MAX: {
                                 char *e = NULL;
 
                                 errno = 0;
-                                rttime_ns_max = strtoull(optarg, &e, 0);
-                                if (errno != 0 || !e || *e || rttime_ns_max <= 0) {
-                                        fprintf(stderr, "--rttime-ns-max parameter invalid.\n");
+                                rttime_nsec_max = strtoull(optarg, &e, 0);
+                                if (errno != 0 || !e || *e || rttime_nsec_max <= 0) {
+                                        fprintf(stderr, "--rttime-nsec-max parameter invalid.\n");
                                         return -1;
                                 }
                                 break;
@@ -1492,6 +1854,42 @@ static int parse_command_line(int argc, char *argv[], int *ret) {
                                 do_limit_resources = FALSE;
                                 break;
 
+                        case ARG_NO_CANARY:
+                                do_canary = FALSE;
+                                break;
+
+                        case ARG_CANARY_WATCHDOG_MSEC: {
+                                char *e = NULL;
+                                unsigned long u;
+
+                                errno = 0;
+                                u = strtoul(optarg, &e, 0);
+                                if (errno != 0 || !e || *e || u <= 0) {
+                                        fprintf(stderr, "--canary-watchdog-msec parameter invalid.\n");
+                                        return -1;
+                                }
+                                canary_watchdog_msec = u;
+                                break;
+                        }
+
+                        case ARG_CANARY_CHEEP_MSEC: {
+                                char *e = NULL;
+                                unsigned long u;
+
+                                errno = 0;
+                                u = strtoul(optarg, &e, 0);
+                                if (errno != 0 || !e || *e || u <= 0) {
+                                        fprintf(stderr, "--canary-cheep-msec parameter invalid.\n");
+                                        return -1;
+                                }
+                                canary_cheep_msec = u;
+                                break;
+                        }
+
+                        case ARG_CANARY_DEMOTE_ROOT:
+                                canary_demote_root = TRUE;
+                                break;
+
                         case '?':
                         default:
                                 fprintf(stderr, "Unknown command.\n");
@@ -1511,6 +1909,26 @@ static int parse_command_line(int argc, char *argv[], int *ret) {
                 return -1;
         }
 
+        if (canary_cheep_msec >= canary_watchdog_msec) {
+                fprintf(stderr, "The canary watchdog interval must be larger than the cheep interval.\n");
+                return -1;
+        }
+
+        assert(our_realtime_priority >= (unsigned) sched_get_priority_min(SCHED_RR));
+        assert(our_realtime_priority <= (unsigned) sched_get_priority_max(SCHED_RR));
+
+        assert(max_realtime_priority >= (unsigned) sched_get_priority_min(SCHED_RR));
+        assert(max_realtime_priority <= (unsigned) sched_get_priority_max(SCHED_RR));
+
+        assert(canary_watchdog_realtime_priority >= (unsigned) sched_get_priority_min(SCHED_RR));
+        assert(canary_watchdog_realtime_priority <= (unsigned) sched_get_priority_max(SCHED_RR));
+
+        assert(our_nice_level >= PRIO_MIN);
+        assert(our_nice_level < PRIO_MAX);
+
+        assert(min_nice_level >= PRIO_MIN);
+        assert(min_nice_level < PRIO_MAX);
+
         return 1;
 }
 
@@ -1527,7 +1945,7 @@ int main(int argc, char *argv[]) {
                 goto finish;
         }
 
-        self_drop_realtime();
+        self_drop_realtime(our_nice_level);
 
         if (setup_dbus(&bus) < 0)
                 goto finish;
@@ -1536,6 +1954,9 @@ int main(int argc, char *argv[]) {
                 goto finish;
 
         if (set_resource_limits() < 0)
+                goto finish;
+
+        if (start_canary() < 0)
                 goto finish;
 
         umask(0777);
@@ -1559,12 +1980,14 @@ finish:
                 dbus_connection_unref(bus);
         }
 
-        reset_all();
+        reset_known();
 
         while ((u = users)) {
                 users = u->next;
                 free_user(u);
         }
+
+        stop_canary();
 
         dbus_shutdown();
 

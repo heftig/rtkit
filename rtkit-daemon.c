@@ -19,6 +19,8 @@
   along with RealtimeKit. If not, see <http://www.gnu.org/licenses/>.
 ***/
 
+#pragma GCC diagnostic ignored "-Wunused-parameter"
+
 #define _GNU_SOURCE
 
 #include <stdbool.h>

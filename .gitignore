@@ -1,3 +1,4 @@
 rtkit-daemon
 rtkit-test
+rtkitctl
 *.o

@@ -108,6 +108,8 @@ finish:
         if (r)
                 dbus_message_unref(r);
 
+        dbus_error_free(&error);
+
         return ret;
 }
 
@@ -166,6 +168,8 @@ finish:
 
         if (r)
                 dbus_message_unref(r);
+
+        dbus_error_free(&error);
 
         return ret;
 }

@@ -1320,10 +1320,10 @@ static void* watchdog_thread(void *data) {
         enum {
                 POLLFD_CANARY,
                 POLLFD_QUIT,
-                POLLFD_MAX
+                _POLLFD_MAX
         };
         struct timespec last_cheep, now;
-        struct pollfd pollfd[POLLFD_MAX];
+        struct pollfd pollfd[_POLLFD_MAX];
 
         assert(canary_fd >= 0);
         assert(quit_fd >= 0);
@@ -1352,7 +1352,7 @@ static void* watchdog_thread(void *data) {
                 if (msec < 0)
                         msec = 0;
 
-                r = poll(pollfd, POLLFD_MAX, (int) msec);
+                r = poll(pollfd, _POLLFD_MAX, (int) msec);
 
                 assert_se(clock_gettime(CLOCK_MONOTONIC, &now) == 0);
 
@@ -1612,7 +1612,7 @@ enum {
 /* Table for getopt_long() */
 static const struct option long_options[] = {
     { "help",                        no_argument,       0, ARG_HELP },
-    { "version",                     no_argument,       0, ARG_VERSION},
+    { "version",                     no_argument,       0, ARG_VERSION },
     { "our-realtime-priority",       required_argument, 0, ARG_OUR_REALTIME_PRIORITY },
     { "our-nice-level",              required_argument, 0, ARG_OUR_NICE_LEVEL },
     { "max-realtime-priority",       required_argument, 0, ARG_MAX_REALTIME_PRIORITY },

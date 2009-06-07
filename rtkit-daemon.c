@@ -1704,7 +1704,7 @@ static int parse_command_line(int argc, char *argv[], int *ret) {
                                 return 0;
 
                         case ARG_VERSION:
-                                printf("%s 0.1\n", get_file_name(argv[0]));
+                                printf("%s " PACKAGE_VERSION "\n", get_file_name(argv[0]));
                                 *ret = 0;
                                 return 0;
 

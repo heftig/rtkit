@@ -45,6 +45,7 @@
 #include <sys/eventfd.h>
 #include <pthread.h>
 #include <dirent.h>
+#include <syslog.h>
 
 #include "rtkit.h"
 
@@ -153,6 +154,9 @@ static unsigned canary_watchdog_realtime_priority = 99;
 
 /* Demote root processes? */
 static bool canary_demote_root = FALSE;
+
+/* Log to stderr? */
+static bool log_stderr = FALSE;
 
 struct thread {
         /* We use the thread id plus its starttime as a unique identifier for threads */
@@ -306,7 +310,7 @@ static bool verify_burst(struct user *u) {
 
         if (u->n_actions >= actions_per_burst_max) {
                 char user[64];
-                fprintf(stderr, "Warning: Reached burst limit for user '%s', denying request.\n", get_user_name(u->uid, user, sizeof(user)));
+                syslog(LOG_WARNING, "Warning: Reached burst limit for user '%s', denying request.\n", get_user_name(u->uid, user, sizeof(user)));
                 return false;
         }
 
@@ -324,7 +328,7 @@ static int find_user(struct user **_u, uid_t uid) {
                 }
 
         if (n_users >= users_max)  {
-                fprintf(stderr, "Warning: Reached maximum concurrent user limit, denying request.\n");
+                syslog(LOG_WARNING, "Warning: Reached maximum concurrent user limit, denying request.\n");
                 return -EBUSY;
         }
 
@@ -355,7 +359,7 @@ static int find_process(struct process** _p, struct user *u, pid_t pid, unsigned
 
         if (u->n_processes >= processes_per_user_max) {
                 char user[64];
-                fprintf(stderr, "Warning: Reached maximum concurrent process limit for user '%s', denying request.\n", get_user_name(u->uid, user, sizeof(user)));
+                syslog(LOG_WARNING, "Warning: Reached maximum concurrent process limit for user '%s', denying request.\n", get_user_name(u->uid, user, sizeof(user)));
                 return -EBUSY;
         }
 
@@ -385,7 +389,7 @@ static int find_thread(struct thread** _t, struct user *u, struct process *p, pi
 
         if (u->n_threads >= threads_per_user_max) {
                 char user[64];
-                fprintf(stderr, "Warning: Reached maximum concurrent threads limit for user '%s', denying request.\n", get_user_name(u->uid, user, sizeof(user)));
+                syslog(LOG_WARNING, "Warning: Reached maximum concurrent threads limit for user '%s', denying request.\n", get_user_name(u->uid, user, sizeof(user)));
                 return -EBUSY;
         }
 
@@ -417,7 +421,7 @@ static bool thread_relevant(struct process *p, struct thread *t) {
                 if (r == -ENOENT)
                         return FALSE;
 
-                fprintf(stderr, "Warning: failed to read start time: %s\n", strerror(-r));
+                syslog(LOG_WARNING, "Warning: failed to read start time: %s\n", strerror(-r));
                 return FALSE;
         }
 
@@ -431,7 +435,7 @@ static bool thread_relevant(struct process *p, struct thread *t) {
                 if (errno == ESRCH)
                         return FALSE;
 
-                fprintf(stderr, "Warning: failed to read scheduler policy: %s\n", strerror(errno));
+                syslog(LOG_WARNING, "Warning: failed to read scheduler policy: %s\n", strerror(errno));
                 return FALSE;
         }
 
@@ -448,7 +452,7 @@ static bool thread_relevant(struct process *p, struct thread *t) {
                 if (errno == ESRCH)
                         return FALSE;
 
-                fprintf(stderr, "Warning: failed to read nice level: %s\n", strerror(errno));
+                syslog(LOG_WARNING, "Warning: failed to read nice level: %s\n", strerror(errno));
                 return FALSE;
         }
 
@@ -552,7 +556,7 @@ static int self_set_realtime(unsigned priority) {
 
         if (sched_setscheduler(0, SCHED_RR|SCHED_RESET_ON_FORK, &param) < 0) {
                 r = -errno;
-                fprintf(stderr, "Failed to make ourselves SCHED_RR: %s\n", strerror(errno));
+                syslog(LOG_ERR, "Failed to make ourselves SCHED_RR: %s\n", strerror(errno));
                 goto finish;
         }
 
@@ -568,10 +572,10 @@ static void self_drop_realtime(int nice_level) {
         memset(&param, 0, sizeof(param));
 
         if (sched_setscheduler(0, SCHED_OTHER, &param) < 0)
-                fprintf(stderr, "Warning: Failed to reset scheduling to SCHED_OTHER: %s\n", strerror(errno));
+                syslog(LOG_WARNING, "Warning: Failed to reset scheduling to SCHED_OTHER: %s\n", strerror(errno));
 
         if (setpriority(PRIO_PROCESS, 0, nice_level) < 0)
-                fprintf(stderr, "Warning: Failed to reset nice level to %u: %s\n", our_nice_level, strerror(errno));
+                syslog(LOG_WARNING, "Warning: Failed to reset nice level to %u: %s\n", our_nice_level, strerror(errno));
 }
 
 /* Verifies that RLIMIT_RTTIME is set for the specified process */
@@ -586,7 +590,7 @@ static int verify_process_rttime(struct process *p) {
 
         if (!(f = fopen(fn, "r"))) {
                 r = -errno;
-                fprintf(stderr, "Failed to open '%s': %s\n", fn, strerror(errno));
+                syslog(LOG_ERR, "Failed to open '%s': %s\n", fn, strerror(errno));
                 return r;
         }
 
@@ -603,7 +607,7 @@ static int verify_process_rttime(struct process *p) {
                         continue;
 
                 if (sscanf(line + 20, "%s %s", soft, hard) != 2) {
-                        fprintf(stderr, "Warning: parse failure in %s.\n", fn);
+                        syslog(LOG_WARNING, "Warning: parse failure in %s.\n", fn);
                         break;
                 }
 
@@ -637,7 +641,7 @@ static int verify_process_user(struct user *u, struct process *p) {
                 r = -errno;
 
                 if (r != -ENOENT)
-                        fprintf(stderr, "Warning: Failed to stat() file '%s': %s\n", fn, strerror(-r));
+                        syslog(LOG_WARNING, "Warning: Failed to stat() file '%s': %s\n", fn, strerror(-r));
 
                 return r;
         }
@@ -652,7 +656,7 @@ static int verify_process_starttime(struct process *p) {
         if ((r = read_starttime(p->pid, 0, &st)) < 0) {
 
                 if (r != -ENOENT)
-                        fprintf(stderr, "Warning: Failed to read start time of process %llu: %s\n", (unsigned long long) p->pid, strerror(-r));
+                        syslog(LOG_WARNING, "Warning: Failed to read start time of process %llu: %s\n", (unsigned long long) p->pid, strerror(-r));
 
                 return r;
         }
@@ -667,7 +671,7 @@ static int verify_thread_starttime(struct process *p, struct thread *t) {
         if ((r = read_starttime(p->pid, t->pid, &st)) < 0) {
 
                 if (r != -ENOENT)
-                        fprintf(stderr, "Warning: Failed to read start time of thread %llu: %s\n", (unsigned long long) t->pid, strerror(-r));
+                        syslog(LOG_WARNING, "Warning: Failed to read start time of thread %llu: %s\n", (unsigned long long) t->pid, strerror(-r));
 
                 return r;
         }
@@ -684,13 +688,13 @@ static int thread_reset(pid_t tid) {
 
         if (sched_setscheduler(tid, SCHED_OTHER, &param) < 0) {
                 if (errno != ESRCH)
-                        fprintf(stderr, "Warning: Failed to reset scheduling to SCHED_OTHER for thread %llu: %s\n", (unsigned long long) tid, strerror(errno));
+                        syslog(LOG_WARNING, "Warning: Failed to reset scheduling to SCHED_OTHER for thread %llu: %s\n", (unsigned long long) tid, strerror(errno));
                 r = -1;
         }
 
         if (setpriority(PRIO_PROCESS, tid, 0) < 0) {
                 if (errno != ESRCH)
-                        fprintf(stderr, "Warning: Failed to reset nice level to 0 for thread %llu: %s\n", (unsigned long long) tid, strerror(errno));
+                        syslog(LOG_WARNING, "Warning: Failed to reset nice level to 0 for thread %llu: %s\n", (unsigned long long) tid, strerror(errno));
                 r = -1;
         }
 
@@ -752,7 +756,7 @@ static int process_set_realtime(struct user *u, struct process *p, struct thread
         param.sched_priority = (int) priority;
         if (sched_setscheduler(t->pid, SCHED_RR|SCHED_RESET_ON_FORK, &param) < 0) {
                 r = -errno;
-                fprintf(stderr, "Failed to make thread %llu SCHED_RR: %s\n", (unsigned long long) t->pid, strerror(errno));
+                syslog(LOG_ERR, "Failed to make thread %llu SCHED_RR: %s\n", (unsigned long long) t->pid, strerror(errno));
                 goto finish;
         }
 
@@ -768,12 +772,12 @@ static int process_set_realtime(struct user *u, struct process *p, struct thread
                 goto finish;
         }
 
-        fprintf(stderr, "Sucessfully made thread %llu of process %llu (%s) owned by '%s' SCHED_RR at priority %u.\n",
-                (unsigned long long) t->pid,
-                (unsigned long long) p->pid,
-                get_exe_name(p->pid, exe, sizeof(exe)),
-                get_user_name(u->uid, user, sizeof(user)),
-                priority);
+        syslog(LOG_INFO, "Sucessfully made thread %llu of process %llu (%s) owned by '%s' SCHED_RR at priority %u.\n",
+               (unsigned long long) t->pid,
+               (unsigned long long) p->pid,
+               get_exe_name(p->pid, exe, sizeof(exe)),
+               get_user_name(u->uid, user, sizeof(user)),
+               priority);
 
         r = 0;
 
@@ -814,13 +818,13 @@ static int process_set_high_priority(struct user *u, struct process *p, struct t
         param.sched_priority = 0;
         if (sched_setscheduler(t->pid, SCHED_OTHER|SCHED_RESET_ON_FORK, &param) < 0) {
                 r = -errno;
-                fprintf(stderr, "Failed to make process %llu SCHED_NORMAL: %s\n", (unsigned long long) t->pid, strerror(errno));
+                syslog(LOG_ERR, "Failed to make process %llu SCHED_NORMAL: %s\n", (unsigned long long) t->pid, strerror(errno));
                 goto finish;
         }
 
         if (setpriority(PRIO_PROCESS, t->pid, priority) < 0) {
                 r = -errno;
-                fprintf(stderr, "Failed to set nice level of process %llu to %i: %s\n", (unsigned long long) t->pid, priority, strerror(errno));
+                syslog(LOG_ERR, "Failed to set nice level of process %llu to %i: %s\n", (unsigned long long) t->pid, priority, strerror(errno));
                 goto finish;
         }
 
@@ -832,12 +836,12 @@ static int process_set_high_priority(struct user *u, struct process *p, struct t
                 goto finish;
         }
 
-        fprintf(stderr, "Sucessfully made thread %llu of process %llu (%s) owned by '%s' high priority at nice level %i.\n",
-                (unsigned long long) t->pid,
-                (unsigned long long) p->pid,
-                get_exe_name(p->pid, exe, sizeof(exe)),
-                get_user_name(u->uid, user, sizeof(user)),
-                priority);
+        syslog(LOG_INFO, "Sucessfully made thread %llu of process %llu (%s) owned by '%s' high priority at nice level %i.\n",
+               (unsigned long long) t->pid,
+               (unsigned long long) p->pid,
+               get_exe_name(p->pid, exe, sizeof(exe)),
+               get_user_name(u->uid, user, sizeof(user)),
+               priority);
 
         r = 0;
 
@@ -869,11 +873,11 @@ static int reset_all(void) {
         /* Goes through /proc and demotes *all* threads to
          * SCHED_OTHER */
 
-        fprintf(stderr, "Rampaging.\n");
+        syslog(LOG_INFO, "Rampaging.\n");
 
         if (!(pd = opendir(get_proc_path()))) {
                 r = -errno;
-                fprintf(stderr, "opendir(%s) failed: %s\n", get_proc_path(), strerror(errno));
+                syslog(LOG_ERR, "opendir(%s) failed: %s\n", get_proc_path(), strerror(errno));
                 return r;
         }
 
@@ -904,7 +908,8 @@ static int reset_all(void) {
                 fn[sizeof(fn)-1] = 0;
 
                 if (stat(fn, &st) < 0) {
-                        fprintf(stderr, "Warning: stat(%s) failed: %s\n", fn, strerror(errno));
+                        if (errno != ENOENT)
+                                syslog(LOG_WARNING, "Warning: stat(%s) failed: %s\n", fn, strerror(errno));
                         continue;
                 }
 
@@ -939,7 +944,7 @@ static int reset_all(void) {
 
                         if ((r = sched_getscheduler(tid)) < 0) {
                                 if (errno != ESRCH)
-                                        fprintf(stderr, "Warning: sched_getscheduler() failed: %s\n", strerror(errno));
+                                        syslog(LOG_WARNING, "Warning: sched_getscheduler() failed: %s\n", strerror(errno));
                                 continue;
                         }
 
@@ -947,10 +952,10 @@ static int reset_all(void) {
                             r == (SCHED_FIFO|SCHED_RESET_ON_FORK) || r == (SCHED_RR|SCHED_RESET_ON_FORK))
                                 if (thread_reset((pid_t) tid) >= 0) {
                                         char exe[64];
-                                        fprintf(stderr, "Successfully demoted thread %llu of process %llu (%s).\n",
-                                                (unsigned long long) tid,
-                                                (unsigned long long) pid,
-                                                get_exe_name(pid, exe, sizeof(exe)));
+                                        syslog(LOG_NOTICE, "Successfully demoted thread %llu of process %llu (%s).\n",
+                                               (unsigned long long) tid,
+                                               (unsigned long long) pid,
+                                               get_exe_name(pid, exe, sizeof(exe)));
                                         n_demoted++;
                                 }
                 }
@@ -960,7 +965,7 @@ static int reset_all(void) {
 
         closedir(pd);
 
-        fprintf(stderr, "Demoted %u threads.\n", n_demoted);
+        syslog(LOG_NOTICE, "Demoted %u threads.\n", n_demoted);
 
         return 0;
 }
@@ -1030,13 +1035,13 @@ static int lookup_client(
 
         /* Determine caller credentials */
         if ((uid = dbus_bus_get_unix_user(c, dbus_message_get_sender(m), &error)) == (unsigned long) -1) {
-                fprintf(stderr, "dbus_message_get_unix_user() failed: %s\n", error.message);
+                syslog(LOG_ERR, "dbus_message_get_unix_user() failed: %s\n", error.message);
                 r = -EIO;
                 goto fail;
         }
 
         if ((pid = get_unix_process_id(c, dbus_message_get_sender(m), &error)) == (unsigned long) -1) {
-                fprintf(stderr, "get_unix_process_id() failed: %s\n", error.message);
+                syslog(LOG_ERR, "get_unix_process_id() failed: %s\n", error.message);
                 r = -EIO;
                 goto fail;
         }
@@ -1112,7 +1117,7 @@ static DBusHandlerResult dbus_handler(DBusConnection *c, DBusMessage *m, void *u
                                            DBUS_TYPE_UINT32, &priority,
                                            DBUS_TYPE_INVALID)) {
 
-                        fprintf(stderr, "Failed to parse MakeThreadRealtime() method call: %s\n", error.message);
+                        syslog(LOG_DEBUG, "Failed to parse MakeThreadRealtime() method call: %s\n", error.message);
                         assert_se(r = dbus_message_new_error(m, error.name, error.message));
 
                         goto finish;
@@ -1144,7 +1149,7 @@ static DBusHandlerResult dbus_handler(DBusConnection *c, DBusMessage *m, void *u
                                            DBUS_TYPE_INT32, &priority,
                                            DBUS_TYPE_INVALID)) {
 
-                        fprintf(stderr, "Failed to parse MakeThreadHighPriority() method call: %s\n", error.message);
+                        syslog(LOG_DEBUG, "Failed to parse MakeThreadHighPriority() method call: %s\n", error.message);
                         assert_se(r = dbus_message_new_error(m, error.name, error.message));
 
                         goto finish;
@@ -1194,7 +1199,7 @@ static DBusHandlerResult dbus_handler(DBusConnection *c, DBusMessage *m, void *u
         } else
                 return DBUS_HANDLER_RESULT_NOT_YET_HANDLED;
 
-        fprintf(stderr, "Supervising %u threads of %u processes of %u users.\n",
+        syslog(LOG_DEBUG, "Supervising %u threads of %u processes of %u users.\n",
                 n_total_threads,
                 n_total_processes,
                 n_users);
@@ -1221,12 +1226,12 @@ static int setup_dbus(DBusConnection **c) {
         dbus_error_init(&error);
 
         if (!(*c = dbus_bus_get_private(DBUS_BUS_SYSTEM, &error))) {
-                fprintf(stderr, "Failed to connect to system bus: %s\n", error.message);
+                syslog(LOG_ERR, "Failed to connect to system bus: %s\n", error.message);
                 goto fail;
         }
 
         if (dbus_bus_request_name(*c, RTKIT_SERVICE_NAME, DBUS_NAME_FLAG_DO_NOT_QUEUE, &error) < 0) {
-                fprintf(stderr, "Failed to register name on bus: %s\n", error.message);
+                syslog(LOG_ERR, "Failed to register name on bus: %s\n", error.message);
                 goto fail;
         }
 
@@ -1265,7 +1270,7 @@ static void* canary_thread(void *data) {
         assert_se(clock_gettime(CLOCK_MONOTONIC, &now) == 0);
         last_cheep = now;
 
-        fprintf(stderr, "Canary thread running.\n");
+        syslog(LOG_DEBUG, "Canary thread running.\n");
 
         for (;;) {
                 int r;
@@ -1284,12 +1289,12 @@ static void* canary_thread(void *data) {
                         if (errno == EINTR || errno == EAGAIN)
                                 continue;
 
-                        fprintf(stderr, "poll() failed: %s\n", strerror(errno));
+                        syslog(LOG_ERR, "poll() failed: %s\n", strerror(errno));
                         break;
                 }
 
                 if (pollfd.revents) {
-                        fprintf(stderr, "Exiting canary thread.\n");
+                        syslog(LOG_DEBUG, "Exiting canary thread.\n");
                         break;
                 }
 
@@ -1297,12 +1302,11 @@ static void* canary_thread(void *data) {
                         eventfd_t value = 1;
 
                         if (eventfd_write(canary_fd, value) < 0) {
-                                fprintf(stderr, "eventfd_write() failed: %s\n", strerror(errno));
+                                syslog(LOG_ERR, "eventfd_write() failed: %s\n", strerror(errno));
                                 break;
                         }
 
                         last_cheep = now;
-                        fprintf(stderr, "Sent cheep\n");
                         continue;
                 }
         }
@@ -1335,7 +1339,7 @@ static void* watchdog_thread(void *data) {
         assert_se(clock_gettime(CLOCK_MONOTONIC, &now) == 0);
         last_cheep = now;
 
-        fprintf(stderr, "Watchdog thread running.\n");
+        syslog(LOG_DEBUG, "Watchdog thread running.\n");
 
         for (;;) {
                 int r;
@@ -1354,12 +1358,12 @@ static void* watchdog_thread(void *data) {
                         if (errno == EINTR || errno == EAGAIN)
                                 continue;
 
-                        fprintf(stderr, "poll() failed: %s\n", strerror(errno));
+                        syslog(LOG_ERR, "poll() failed: %s\n", strerror(errno));
                         break;
                 }
 
                 if (pollfd[POLLFD_QUIT].revents) {
-                        fprintf(stderr, "Exiting watchdog thread.\n");
+                        syslog(LOG_DEBUG, "Exiting watchdog thread.\n");
                         break;
                 }
 
@@ -1367,18 +1371,17 @@ static void* watchdog_thread(void *data) {
                         eventfd_t value;
 
                         if (eventfd_read(canary_fd, &value) < 0) {
-                                fprintf(stderr, "eventfd_read() failed: %s\n", strerror(errno));
+                                syslog(LOG_ERR, "eventfd_read() failed: %s\n", strerror(errno));
                                 break;
                         }
 
                         last_cheep = now;
-                        fprintf(stderr, "Recieved cheep\n");
                         continue;
                 }
 
                 if (TIMESPEC_MSEC(last_cheep) + canary_watchdog_msec <= TIMESPEC_MSEC(now)) {
                         last_cheep = now;
-                        fprintf(stderr, "The poor little canary died! Taking action.\n");
+                        syslog(LOG_WARNING, "The poor little canary died! Taking action.\n");
                         reset_all();
                         continue;
                 }
@@ -1393,18 +1396,18 @@ static void stop_canary(void) {
         if (quit_fd >= 0) {
                 eventfd_t value = 1;
                 if (eventfd_write(quit_fd, value) < 0)
-                        fprintf(stderr, "Warning: eventfd_write() failed: %s\n", strerror(errno));
+                        syslog(LOG_WARNING, "Warning: eventfd_write() failed: %s\n", strerror(errno));
         }
 
         if (canary_thread_id != 0) {
                 if ((r = pthread_join(canary_thread_id, NULL)) != 0)
-                        fprintf(stderr, "Warning: pthread_join() failed: %s\n", strerror(r));
+                        syslog(LOG_WARNING, "Warning: pthread_join() failed: %s\n", strerror(r));
                 canary_thread_id = 0;
         }
 
         if (watchdog_thread_id != 0) {
                 if ((r = pthread_join(watchdog_thread_id, NULL)) != 0)
-                        fprintf(stderr, "Warning: pthread_join() failed: %s\n", strerror(r));
+                        syslog(LOG_WARNING, "Warning: pthread_join() failed: %s\n", strerror(r));
                 watchdog_thread_id = 0;
         }
 
@@ -1428,13 +1431,13 @@ static int start_canary(void) {
         if ((canary_fd = eventfd(0, EFD_NONBLOCK|EFD_CLOEXEC)) < 0 ||
             (quit_fd = eventfd(0, EFD_NONBLOCK|EFD_CLOEXEC)) < 0) {
                 r = -errno;
-                fprintf(stderr, "eventfd() failed: %s\n", strerror(errno));
+                syslog(LOG_ERR, "eventfd() failed: %s\n", strerror(errno));
                 goto fail;
         }
 
         if ((r = -pthread_create(&canary_thread_id, NULL, canary_thread, NULL)) < 0 ||
             (r = -pthread_create(&watchdog_thread_id, NULL, watchdog_thread, NULL)) < 0) {
-                fprintf(stderr, "pthread_create failed: %s\n", strerror(-r));
+                syslog(LOG_ERR, "pthread_create failed: %s\n", strerror(-r));
                 goto fail;
         }
 
@@ -1453,7 +1456,7 @@ static int drop_privileges(void) {
 
                 /* First, get user data */
                 if (!(pw = getpwnam(username))) {
-                        fprintf(stderr, "Failed to find user '%s'.\n", username);
+                        syslog(LOG_ERR, "Failed to find user '%s'.\n", username);
                         return -ENOENT;
                 }
         }
@@ -1464,12 +1467,12 @@ static int drop_privileges(void) {
                 if (chroot("/proc") < 0 ||
                     chdir("/") < 0) {
                         r = -errno;
-                        fprintf(stderr, "Failed to chroot() to /proc: %s\n", strerror(errno));
+                        syslog(LOG_ERR, "Failed to chroot() to /proc: %s\n", strerror(errno));
                         return r;
                 }
                 proc = "/";
 
-                fprintf(stderr, "Sucessfully called chroot.\n");
+                syslog(LOG_DEBUG, "Sucessfully called chroot.\n");
         }
 
         if (do_drop_privileges) {
@@ -1483,7 +1486,7 @@ static int drop_privileges(void) {
                 /* Third, say that we want to keep caps */
                 if (prctl(PR_SET_KEEPCAPS, 1) < 0) {
                         r = -errno;
-                        fprintf(stderr, "PR_SET_KEEPCAPS failed: %s\n", strerror(errno));
+                        syslog(LOG_ERR, "PR_SET_KEEPCAPS failed: %s\n", strerror(errno));
                         return r;
                 }
 
@@ -1491,14 +1494,14 @@ static int drop_privileges(void) {
                 if (setresgid(pw->pw_gid, pw->pw_gid, pw->pw_gid) < 0 ||
                     setresuid(pw->pw_uid, pw->pw_uid, pw->pw_uid) < 0) {
                         r = -errno;
-                        fprintf(stderr, "Failed to become %s: %s\n", username, strerror(errno));
+                        syslog(LOG_ERR, "Failed to become %s: %s\n", username, strerror(errno));
                         return r;
                 }
 
                 /* Fifth, reset caps flag */
                 if (prctl(PR_SET_KEEPCAPS, 0) < 0) {
                         r = -errno;
-                        fprintf(stderr, "PR_SET_KEEPCAPS failed: %s\n", strerror(errno));
+                        syslog(LOG_ERR, "PR_SET_KEEPCAPS failed: %s\n", strerror(errno));
                         return r;
                 }
 
@@ -1510,7 +1513,7 @@ static int drop_privileges(void) {
 
                 if (cap_set_proc(caps) < 0) {
                         r = -errno;
-                        fprintf(stderr, "cap_set_proc() failed: %s\n", strerror(errno));
+                        syslog(LOG_ERR, "cap_set_proc() failed: %s\n", strerror(errno));
                         return r;
                 }
 
@@ -1522,7 +1525,7 @@ static int drop_privileges(void) {
                 setenv("LOGNAME", username, 1);
                 setenv("HOME", get_proc_path(), 1);
 
-                fprintf(stderr, "Sucessfully dropped privileges.\n");
+                syslog(LOG_DEBUG, "Sucessfully dropped privileges.\n");
         }
 
         return 0;
@@ -1559,7 +1562,7 @@ static int set_resource_limits(void) {
 
                 if (getrlimit(table[u].id, &rlim) < 0) {
                         r = -errno;
-                        fprintf(stderr, "Failed to get %s: %s\n", table[u].name, strerror(errno));
+                        syslog(LOG_ERR, "Failed to get %s: %s\n", table[u].name, strerror(errno));
                         return r;
                 }
 
@@ -1570,12 +1573,12 @@ static int set_resource_limits(void) {
 
                 if (setrlimit(table[u].id, &rlim) < 0) {
                         r = -errno;
-                        fprintf(stderr, "Failed to set %s: %s\n", table[u].name, strerror(errno));
+                        syslog(LOG_ERR, "Failed to set %s: %s\n", table[u].name, strerror(errno));
                         return r;
                 }
         }
 
-        fprintf(stderr, "Sucessfully limited resources.\n");
+        syslog(LOG_DEBUG, "Sucessfully limited resources.\n");
 
         return 0;
 }
@@ -1600,7 +1603,8 @@ enum {
         ARG_NO_CANARY,
         ARG_CANARY_CHEEP_MSEC,
         ARG_CANARY_WATCHDOG_MSEC,
-        ARG_CANARY_DEMOTE_ROOT
+        ARG_CANARY_DEMOTE_ROOT,
+        ARG_STDERR
 };
 
 /* Table for getopt_long() */
@@ -1625,6 +1629,7 @@ static const struct option long_options[] = {
     { "canary-cheep-msec",           required_argument, 0, ARG_CANARY_CHEEP_MSEC },
     { "canary-watchdog-msec",        required_argument, 0, ARG_CANARY_WATCHDOG_MSEC },
     { "canary-demote-root",          no_argument,       0, ARG_CANARY_DEMOTE_ROOT },
+    { "stderr",                      no_argument,       0, ARG_STDERR },
     { NULL, 0, 0, 0}
 };
 
@@ -1644,11 +1649,12 @@ static void show_help(const char *exe) {
                "  -h, --help                          Show this help\n"
                "      --version                       Show version\n\n"
                "OPTIONS:\n"
+               "      --stderr                        Log to STDERR in addition to syslog\n"
+               "      --user-name=USER                Run daemon as user (%s)\n\n"
                "      --our-realtime-priority=[%i..%i] Realtime priority for the daemon (%u)\n"
                "      --our-nice-level=[%i..%i]      Nice level for the daemon (%i)\n"
                "      --max-realtime-priority=[%i..%i] Max realtime priority for clients (%u)\n"
                "      --min-nice-level=[%i..%i]      Min nice level for clients (%i)\n\n"
-               "      --user-name=USER                Run daemon as user (%s)\n\n"
                "      --rttime-nsec-max=NSEC          Require clients to have set RLIMIT_RTTIME\n\n"
                "                                      not greater than this (%llu)\n"
                "      --users-max=INT                 How many users this daemon will serve at\n"
@@ -1667,11 +1673,11 @@ static void show_help(const char *exe) {
                "      --no-chroot                     Don't chroot\n"
                "      --no-limit-resources            Don't limit daemon's resources\n",
                exe,
+               username,
                sched_get_priority_min(SCHED_RR), sched_get_priority_max(SCHED_RR), our_realtime_priority,
                PRIO_MIN, PRIO_MAX-1, our_nice_level,
                sched_get_priority_min(SCHED_RR), sched_get_priority_max(SCHED_RR), max_realtime_priority,
                PRIO_MIN, PRIO_MAX-1, min_nice_level,
-               username,
                rttime_nsec_max,
                users_max,
                processes_per_user_max,
@@ -1890,6 +1896,10 @@ static int parse_command_line(int argc, char *argv[], int *ret) {
                                 canary_demote_root = TRUE;
                                 break;
 
+                        case ARG_STDERR:
+                                log_stderr = TRUE;
+                                break;
+
                         case '?':
                         default:
                                 fprintf(stderr, "Unknown command.\n");
@@ -1945,6 +1955,10 @@ int main(int argc, char *argv[]) {
                 goto finish;
         }
 
+        openlog(get_file_name(argv[0]),
+                LOG_NDELAY|LOG_PID|(log_stderr ? LOG_PERROR : 0),
+                LOG_DAEMON);
+
         self_drop_realtime(our_nice_level);
 
         if (setup_dbus(&bus) < 0)
@@ -1961,7 +1975,7 @@ int main(int argc, char *argv[]) {
 
         umask(0777);
 
-        fprintf(stderr, "Running.\n");
+        syslog(LOG_DEBUG, "Running.\n");
 
         dbus_connection_set_exit_on_disconnect(bus, FALSE);
 
@@ -1970,7 +1984,7 @@ int main(int argc, char *argv[]) {
 
         ret = 0;
 
-        fprintf(stderr, "Exiting cleanly.\n");
+        syslog(LOG_DEBUG, "Exiting cleanly.\n");
 
 finish:
 

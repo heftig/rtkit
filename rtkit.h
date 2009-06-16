@@ -30,6 +30,10 @@
 #include <sys/types.h>
 #include <dbus/dbus.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /* This is the reference implementation for a client for
  * RealtimeKit. You don't have to use this, but if do, just copy these
  * sources into your repository */
@@ -50,5 +54,9 @@ int rtkit_make_realtime(DBusConnection *system_bus, pid_t thread, int priority);
  * used. The returned value is a negative errno style error code, or 0
  * on success.*/
 int rtkit_make_high_priority(DBusConnection *system_bus, pid_t thread, int nice_level);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

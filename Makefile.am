@@ -26,7 +26,7 @@ EXTRA_DIST = \
 	LICENSE \
 	org.freedesktop.RealtimeKit1.policy \
 	org.freedesktop.RealtimeKit1.conf \
-	org.freedesktop.RealtimeKit1.service
+	org.freedesktop.RealtimeKit1.service.in
 
 libexec_PROGRAMS = \
 	rtkit-daemon
@@ -61,3 +61,6 @@ rtkit_test_LDADD = \
 	$(DBUS_LIBS)
 rtkit_test_CFLAGS = \
 	$(DBUS_CFLAGS)
+
+org.freedesktop.RealtimeKit1.service: org.freedesktop.RealtimeKit1.service.in
+	sed -e 's,@LIBEXECDIR\@,$(libexecdir),g' < $< > $@

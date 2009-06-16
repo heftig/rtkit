@@ -1,4 +1,4 @@
-CFLAGS=-Wextra -Wall -O0 -g `pkg-config --cflags dbus-1` -pthread -fdiagnostics-show-option -DPACKAGE_VERSION=\"0.1\"
+CFLAGS=-Wextra -Wall -O0 -g `pkg-config --cflags dbus-1` -pthread -fdiagnostics-show-option -DPACKAGE_VERSION=\"0.1\" -rdynamic
 LIBS= `pkg-config --libs dbus-1` -lrt
 
 all: rtkit-daemon rtkit-test rtkitctl

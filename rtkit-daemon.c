@@ -1116,7 +1116,7 @@ static int verify_polkit(DBusConnection *c, struct user *u, struct process *p, c
         const char *pid = "pid";
         const char *start_time = "start-time";
         const char *cancel_id = "";
-        uint32_t flags = 1;
+        uint32_t flags = 0;
         uint32_t pid_u32 = p->pid;
         uint64_t start_time_u64 = p->starttime;
         DBusMessageIter iter_msg, iter_struct, iter_array, iter_dict, iter_variant;

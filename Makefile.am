@@ -28,6 +28,9 @@ EXTRA_DIST = \
 	org.freedesktop.RealtimeKit1.conf \
 	org.freedesktop.RealtimeKit1.service.in
 
+CLEANFILES = \
+	org.freedesktop.RealtimeKit1.service
+
 libexec_PROGRAMS = \
 	rtkit-daemon
 sbin_PROGRAMS = \

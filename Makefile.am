@@ -22,6 +22,7 @@ dbussystemdir = $(sysconfdir)/dbus-1/system.d/
 dbusservicedir = $(datadir)/dbus-1/system-services/
 
 EXTRA_DIST = \
+	README \
 	GPL \
 	LICENSE \
 	org.freedesktop.RealtimeKit1.policy \

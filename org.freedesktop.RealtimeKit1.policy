@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC
+ "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+<policyconfig>
+  <vendor>Lennart Poettering</vendor>
+
+  <action id="org.freedesktop.RealtimeKit1.acquire-high-priority">
+    <description>Grant high priority scheduling to a user process</description>
+    <message>Authentication is required to grant an application high priority scheduling</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>yes</allow_inactive>
+      <allow_active>yes</allow_active>
+    </defaults>
+  </action>
+
+  <action id="org.freedesktop.RealtimeKit1.acquire-real-time">
+    <description>Grant realtime scheduling to a user process</description>
+    <message>Authentication is required to grant an application realtime scheduling</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>yes</allow_inactive>
+      <allow_active>yes</allow_active>
+    </defaults>
+  </action>
+
+</policyconfig>

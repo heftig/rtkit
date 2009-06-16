@@ -1531,12 +1531,12 @@ static void stop_canary(void) {
                 watchdog_thread_id = 0;
         }
 
-        if (canary_fd < 0) {
+        if (canary_fd >= 0) {
                 close(canary_fd);
                 canary_fd = -1;
         }
 
-        if (quit_fd < 0) {
+        if (quit_fd >= 0) {
                 close(quit_fd);
                 quit_fd = -1;
         }

@@ -1081,7 +1081,7 @@ fail:
         return r;
 }
 
-static const char *translate_error(int error) {
+static const char *translate_error_forward(int error) {
         switch (error) {
                 case -EPERM:
                 case -EACCES:
@@ -1094,6 +1094,114 @@ static const char *translate_error(int error) {
                 default:
                         return DBUS_ERROR_FAILED;
         }
+}
+
+static int translate_error_backwards(const char *name) {
+        if (strcmp(name, DBUS_ERROR_NO_MEMORY) == 0)
+                return -ENOMEM;
+        if (strcmp(name, DBUS_ERROR_SERVICE_UNKNOWN) == 0 ||
+            strcmp(name, DBUS_ERROR_NAME_HAS_NO_OWNER) == 0)
+                return -ENOENT;
+        if (strcmp(name, DBUS_ERROR_ACCESS_DENIED) == 0 ||
+            strcmp(name, DBUS_ERROR_AUTH_FAILED) == 0)
+                return -EACCES;
+
+        return -EIO;
+}
+
+static int verify_polkit(DBusConnection *c, struct user *u, struct process *p, const char *action) {
+        DBusError error;
+        DBusMessage *m = NULL, *r = NULL;
+        const char *unix_process = "unix-process";
+        const char *pid = "pid";
+        const char *start_time = "start-time";
+        const char *cancel_id = "";
+        uint32_t flags = 1;
+        uint32_t pid_u32 = p->pid;
+        uint64_t start_time_u64 = p->starttime;
+        DBusMessageIter iter_msg, iter_struct, iter_array, iter_dict, iter_variant;
+        int ret;
+        dbus_bool_t authorized = FALSE;
+
+        dbus_error_init(&error);
+
+        assert_se(m = dbus_message_new_method_call(
+                                  "org.freedesktop.PolicyKit1",
+                                  "/org/freedesktop/PolicyKit1/Authority",
+                                  "org.freedesktop.PolicyKit1.Authority",
+                                  "CheckAuthorization"));
+
+        dbus_message_iter_init_append(m, &iter_msg);
+        assert_se(dbus_message_iter_open_container(&iter_msg, DBUS_TYPE_STRUCT, NULL, &iter_struct));
+        assert_se(dbus_message_iter_append_basic(&iter_struct, DBUS_TYPE_STRING, &unix_process));
+        assert_se(dbus_message_iter_open_container(&iter_struct, DBUS_TYPE_ARRAY, "{sv}", &iter_array));
+
+        assert_se(dbus_message_iter_open_container(&iter_array, DBUS_TYPE_DICT_ENTRY, NULL, &iter_dict));
+        assert_se(dbus_message_iter_append_basic(&iter_dict, DBUS_TYPE_STRING, &pid));
+        assert_se(dbus_message_iter_open_container(&iter_dict, DBUS_TYPE_VARIANT, "u", &iter_variant));
+        assert_se(dbus_message_iter_append_basic(&iter_variant, DBUS_TYPE_UINT32, &pid_u32));
+        assert_se(dbus_message_iter_close_container(&iter_dict, &iter_variant));
+        assert_se(dbus_message_iter_close_container(&iter_array, &iter_dict));
+
+        assert_se(dbus_message_iter_open_container(&iter_array, DBUS_TYPE_DICT_ENTRY, NULL, &iter_dict));
+        assert_se(dbus_message_iter_append_basic(&iter_dict, DBUS_TYPE_STRING, &start_time));
+        assert_se(dbus_message_iter_open_container(&iter_dict, DBUS_TYPE_VARIANT, "t", &iter_variant));
+        assert_se(dbus_message_iter_append_basic(&iter_variant, DBUS_TYPE_UINT64, &start_time_u64));
+        assert_se(dbus_message_iter_close_container(&iter_dict, &iter_variant));
+        assert_se(dbus_message_iter_close_container(&iter_array, &iter_dict));
+
+        assert_se(dbus_message_iter_close_container(&iter_struct, &iter_array));
+        assert_se(dbus_message_iter_close_container(&iter_msg, &iter_struct));
+
+        assert_se(dbus_message_iter_append_basic(&iter_msg, DBUS_TYPE_STRING, &action));
+
+        assert_se(dbus_message_iter_open_container(&iter_msg, DBUS_TYPE_ARRAY, "{ss}", &iter_array));
+        assert_se(dbus_message_iter_close_container(&iter_msg, &iter_array));
+
+        assert_se(dbus_message_iter_append_basic(&iter_msg, DBUS_TYPE_UINT32, &flags));
+        assert_se(dbus_message_iter_append_basic(&iter_msg, DBUS_TYPE_STRING, &cancel_id));
+
+        if (!(r = dbus_connection_send_with_reply_and_block(c, m, -1, &error))) {
+                ret = translate_error_backwards(error.name);
+                goto finish;
+        }
+
+        if (dbus_set_error_from_message(&error, r)) {
+                ret = translate_error_backwards(error.name);
+                goto finish;
+        }
+
+        if (!dbus_message_iter_init(r, &iter_msg) ||
+            dbus_message_iter_get_arg_type(&iter_msg) != DBUS_TYPE_STRUCT) {
+                ret = -EIO;
+                goto finish;
+        }
+
+        dbus_message_iter_recurse(&iter_msg, &iter_struct);
+
+        if (dbus_message_iter_get_arg_type(&iter_struct) != DBUS_TYPE_BOOLEAN) {
+                ret = -EIO;
+                goto finish;
+        }
+
+        dbus_message_iter_get_basic(&iter_struct, &authorized);
+
+        ret = authorized ? 0 : -EPERM;
+
+finish:
+
+        if (m)
+                dbus_message_unref(m);
+
+        if (r)
+                dbus_message_unref(r);
+
+        if (error.message)
+                syslog(LOG_WARNING, "Warning: PolicyKit call failed: %s\n", error.message);
+
+        dbus_error_free(&error);
+
+        return ret;
 }
 
 static DBusHandlerResult dbus_handler(DBusConnection *c, DBusMessage *m, void *userdata) {
@@ -1126,12 +1234,17 @@ static DBusHandlerResult dbus_handler(DBusConnection *c, DBusMessage *m, void *u
                 }
 
                 if ((ret = lookup_client(&u, &p, &t, c, m, (pid_t) thread)) < 0) {
-                        assert_se(r = dbus_message_new_error_printf(m, translate_error(ret), strerror(-ret)));
+                        assert_se(r = dbus_message_new_error_printf(m, translate_error_forward(ret), strerror(-ret)));
+                        goto finish;
+                }
+
+                if ((ret = verify_polkit(c, u, p, "org.freedesktop.RealtimeKit1.acquire-real-time")) < 0) {
+                        assert_se(r = dbus_message_new_error_printf(m, translate_error_forward(ret), strerror(-ret)));
                         goto finish;
                 }
 
                 if ((ret = process_set_realtime(u, p, t, priority))) {
-                        assert_se(r = dbus_message_new_error_printf(m, translate_error(ret), strerror(-ret)));
+                        assert_se(r = dbus_message_new_error_printf(m, translate_error_forward(ret), strerror(-ret)));
                         goto finish;
                 }
 
@@ -1158,12 +1271,17 @@ static DBusHandlerResult dbus_handler(DBusConnection *c, DBusMessage *m, void *u
                 }
 
                 if ((ret = lookup_client(&u, &p, &t, c, m, (pid_t) thread)) < 0) {
-                        assert_se(r = dbus_message_new_error_printf(m, translate_error(ret), strerror(-ret)));
+                        assert_se(r = dbus_message_new_error_printf(m, translate_error_forward(ret), strerror(-ret)));
+                        goto finish;
+                }
+
+                if ((ret = verify_polkit(c, u, p, "org.freedesktop.RealtimeKit1.acquire-high-priority")) < 0) {
+                        assert_se(r = dbus_message_new_error_printf(m, translate_error_forward(ret), strerror(-ret)));
                         goto finish;
                 }
 
                 if ((ret = process_set_high_priority(u, p, t, priority))) {
-                        assert_se(r = dbus_message_new_error_printf(m, translate_error(ret), strerror(-ret)));
+                        assert_se(r = dbus_message_new_error_printf(m, translate_error_forward(ret), strerror(-ret)));
                         goto finish;
                 }
 

@@ -19,9 +19,9 @@
   along with RealtimeKit. If not, see <http://www.gnu.org/licenses/>.
 ***/
 
-#pragma GCC diagnostic ignored "-Wunused-parameter"
-
-#define _GNU_SOURCE
+#ifdef HAVE_CONFIG_H
+#include <config.h>
+#endif
 
 #include <stdbool.h>
 #include <unistd.h>
@@ -56,7 +56,7 @@
 #endif
 
 #ifndef SCHED_RESET_ON_FORK
-#warning "Your libc lacks the definition of SCHED_RESET_ON_FORK. We'll now define it ourselves, however make sure your kernel is new enough!"
+/* "Your libc lacks the definition of SCHED_RESET_ON_FORK. We'll now define it ourselves, however make sure your kernel is new enough! */
 #define SCHED_RESET_ON_FORK 0x40000000
 #endif
 
@@ -930,7 +930,6 @@ static int reset_all(void) {
                 for (;;) {
                         const struct dirent *tde;
                         unsigned long long tid;
-                        int r;
 
                         if (!(tde = readdir(td)))
                                 break;

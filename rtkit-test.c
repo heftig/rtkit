@@ -19,8 +19,6 @@
   along with RealtimeKit. If not, see <http://www.gnu.org/licenses/>.
 ***/
 
-#pragma GCC diagnostic ignored "-Wunused-parameter"
-
 #include <errno.h>
 #include <string.h>
 #include <sched.h>

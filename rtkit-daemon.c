@@ -101,13 +101,13 @@
 #define TIMESPEC_MSEC(ts) (((int64_t) (ts).tv_sec * 1000LL) + ((int64_t) (ts).tv_nsec / 1000000LL))
 
 /* If we actually execute a request we temporarily upgrade our realtime priority to this level */
-static unsigned our_realtime_priority = 30;
+static unsigned our_realtime_priority = 21;
 
 /* Normally we run at this nice level */
 static int our_nice_level = 1;
 
 /* The maximum realtime priority to hand out */
-static unsigned max_realtime_priority = 29;
+static unsigned max_realtime_priority = 20;
 
 /* The minimum nice level to hand out */
 static int min_nice_level = -15;

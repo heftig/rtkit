@@ -22,3 +22,4 @@ depcomp
 install-sh
 missing
 Makefile
+org.freedesktop.RealtimeKit1.service

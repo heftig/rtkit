@@ -66,26 +66,26 @@
 
 #define INTROSPECT_XML                                                  \
         DBUS_INTROSPECT_1_0_XML_DOCTYPE_DECL_NODE                       \
-        "<node>"                                                        \
-        " <interface name=\"org.freedesktop.RealtimeKit1\">"            \
-        "  <method name=\"MakeThreadRealtime\">"                        \
-        "   <arg name=\"thread\" type=\"t\" direction=\"in\"/>"         \
-        "   <arg name=\"priority\" type=\"u\" direction=\"in\"/>"       \
-        "  </method>"                                                   \
-        "  <method name=\"MakeHighPriority\">"                          \
-        "   <arg name=\"thread\" type=\"t\" direction=\"in\"/>"         \
-        "   <arg name=\"priority\" type=\"i\" direction=\"in\"/>"       \
-        "  </method>"                                                   \
-        "  <method name=\"ResetKnown\"/>"                               \
-        "  <method name=\"ResetAll\"/>"                                 \
-        "  <method name=\"Exit\"/>"                                     \
-        " </interface>"                                                 \
-        " <interface name=\"org.freedesktop.DBus.Introspectable\">"     \
-        "  <method name=\"Introspect\">"                                \
-        "   <arg name=\"data\" type=\"s\" direction=\"out\"/>"          \
-        "  </method>"                                                   \
-        " </interface>"                                                 \
-        "</node>"
+        "<node>\n"                                                      \
+        "        <interface name=\"org.freedesktop.RealtimeKit1\">\n"   \
+        "                <method name=\"MakeThreadRealtime\">\n"        \
+        "                        <arg name=\"thread\" type=\"t\" direction=\"in\"/>\n" \
+        "                        <arg name=\"priority\" type=\"u\" direction=\"in\"/>\n" \
+        "                </method>\n"                                   \
+        "                <method name=\"MakeHighPriority\">\n"          \
+        "                        <arg name=\"thread\" type=\"t\" direction=\"in\"/>\n" \
+        "                        <arg name=\"priority\" type=\"i\" direction=\"in\"/>\n" \
+        "                </method>\n"                                   \
+        "                <method name=\"ResetKnown\"/>\n"               \
+        "                <method name=\"ResetAll\"/>\n"                 \
+        "                <method name=\"Exit\"/>\n"                     \
+        "        </interface>\n"                                        \
+        "        <interface name=\"org.freedesktop.DBus.Introspectable\">\n" \
+        "                <method name=\"Introspect\">\n"                \
+        "                        <arg name=\"data\" type=\"s\" direction=\"out\"/>\n" \
+        "                </method>\n"                                   \
+        "        </interface>\n"                                        \
+        "</node>\n"
 
 /* Similar to assert(), but has side effects, and hence shall never be optimized away, regardless of NDEBUG */
 #define assert_se(expr)                                                 \
@@ -1723,7 +1723,8 @@ enum {
         ARG_CANARY_CHEEP_MSEC,
         ARG_CANARY_WATCHDOG_MSEC,
         ARG_CANARY_DEMOTE_ROOT,
-        ARG_STDERR
+        ARG_STDERR,
+        ARG_INTROSPECT
 };
 
 /* Table for getopt_long() */
@@ -1749,6 +1750,7 @@ static const struct option long_options[] = {
     { "canary-watchdog-msec",        required_argument, 0, ARG_CANARY_WATCHDOG_MSEC },
     { "canary-demote-root",          no_argument,       0, ARG_CANARY_DEMOTE_ROOT },
     { "stderr",                      no_argument,       0, ARG_STDERR },
+    { "introspect",                  no_argument,       0, ARG_INTROSPECT },
     { NULL, 0, 0, 0}
 };
 
@@ -1786,7 +1788,8 @@ static void show_help(const char *exe) {
                "      --actions-per-burst-max=INT     Allow this many requests per burst (%u)\n\n"
                "      --canary-cheep-msec=MSEC        Canary cheep interval (%u)\n"
                "      --canary-watchdog-msec=MSEC     Watchdog action delay (%u)\n"
-               "      --canary-demote-root            When the canary dies demote root processes?\n\n"
+               "      --canary-demote-root            When the canary dies demote root\n"
+               "                                      processes too?\n\n"
                "      --no-canary                     Don't run a canary-based RT watchdog\n\n"
                "      --no-drop-privileges            Don't drop privileges\n"
                "      --no-chroot                     Don't chroot\n"
@@ -2018,6 +2021,11 @@ static int parse_command_line(int argc, char *argv[], int *ret) {
                         case ARG_STDERR:
                                 log_stderr = TRUE;
                                 break;
+
+                        case ARG_INTROSPECT:
+                                fputs(INTROSPECT_XML, stdout);
+                                *ret = 0;
+                                return 0;
 
                         case '?':
                         default:

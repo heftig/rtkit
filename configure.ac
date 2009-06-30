@@ -84,6 +84,7 @@ AC_SYS_LARGEFILE
 
 AC_SEARCH_LIBS([sched_setscheduler], [rt])
 AC_SEARCH_LIBS([clock_gettime], [rt])
+AC_SEARCH_LIBS([cap_init], [cap])
 
 PKG_CHECK_MODULES(DBUS, dbus-1)
 

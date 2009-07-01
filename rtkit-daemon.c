@@ -163,6 +163,9 @@ static bool canary_demote_root = FALSE;
 /* Log to stderr? */
 static bool log_stderr = FALSE;
 
+/* Scheduling policy to use */
+static int sched_policy = SCHED_RR;
+
 struct thread {
         /* We use the thread id plus its starttime as a unique identifier for threads */
         pid_t pid;
@@ -560,9 +563,9 @@ static int self_set_realtime(unsigned priority) {
         memset(&param, 0, sizeof(param));
         param.sched_priority = priority;
 
-        if (sched_setscheduler(0, SCHED_RR|SCHED_RESET_ON_FORK, &param) < 0) {
+        if (sched_setscheduler(0, sched_policy|SCHED_RESET_ON_FORK, &param) < 0) {
                 r = -errno;
-                syslog(LOG_ERR, "Failed to make ourselves SCHED_RR: %s\n", strerror(errno));
+                syslog(LOG_ERR, "Failed to make ourselves RT: %s\n", strerror(errno));
                 goto finish;
         }
 
@@ -728,8 +731,8 @@ static int process_set_realtime(struct user *u, struct process *p, struct thread
         struct sched_param param;
         char user[64], exe[128];
 
-        if ((int) priority < sched_get_priority_min(SCHED_RR) ||
-            (int) priority > sched_get_priority_max(SCHED_RR))
+        if ((int) priority < sched_get_priority_min(sched_policy) ||
+            (int) priority > sched_get_priority_max(sched_policy))
                 return -EINVAL;
 
         /* We always want to be able to get a higher RT priority than
@@ -744,7 +747,7 @@ static int process_set_realtime(struct user *u, struct process *p, struct thread
 
         /* Temporarily become a realtime process. We do this to make
          * sure that our verification code is not preempted by an evil
-         * client's code which might have gotten SCHED_RR through
+         * client's code which might have gotten RT through
          * us. */
         if ((r = self_set_realtime(our_realtime_priority)) < 0)
                 return r;
@@ -760,9 +763,9 @@ static int process_set_realtime(struct user *u, struct process *p, struct thread
         /* Ok, everything seems to be in order, now, let's do it */
         memset(&param, 0, sizeof(param));
         param.sched_priority = (int) priority;
-        if (sched_setscheduler(t->pid, SCHED_RR|SCHED_RESET_ON_FORK, &param) < 0) {
+        if (sched_setscheduler(t->pid, sched_policy|SCHED_RESET_ON_FORK, &param) < 0) {
                 r = -errno;
-                syslog(LOG_ERR, "Failed to make thread %llu SCHED_RR: %s\n", (unsigned long long) t->pid, strerror(errno));
+                syslog(LOG_ERR, "Failed to make thread %llu RT: %s\n", (unsigned long long) t->pid, strerror(errno));
                 goto finish;
         }
 
@@ -778,7 +781,7 @@ static int process_set_realtime(struct user *u, struct process *p, struct thread
                 goto finish;
         }
 
-        syslog(LOG_INFO, "Sucessfully made thread %llu of process %llu (%s) owned by '%s' SCHED_RR at priority %u.\n",
+        syslog(LOG_INFO, "Sucessfully made thread %llu of process %llu (%s) owned by '%s' RT at priority %u.\n",
                (unsigned long long) t->pid,
                (unsigned long long) p->pid,
                get_exe_name(p->pid, exe, sizeof(exe)),
@@ -1734,6 +1737,7 @@ static int set_resource_limits(void) {
 enum {
         ARG_HELP = 256,
         ARG_VERSION,
+        ARG_SCHEDULING_POLICY,
         ARG_OUR_REALTIME_PRIORITY,
         ARG_OUR_NICE_LEVEL,
         ARG_MAX_REALTIME_PRIORITY,
@@ -1761,6 +1765,7 @@ enum {
 static const struct option long_options[] = {
     { "help",                        no_argument,       0, ARG_HELP },
     { "version",                     no_argument,       0, ARG_VERSION },
+    { "scheduling-policy",           required_argument, 0, ARG_SCHEDULING_POLICY },
     { "our-realtime-priority",       required_argument, 0, ARG_OUR_REALTIME_PRIORITY },
     { "our-nice-level",              required_argument, 0, ARG_OUR_NICE_LEVEL },
     { "max-realtime-priority",       required_argument, 0, ARG_MAX_REALTIME_PRIORITY },
@@ -1796,6 +1801,13 @@ static char* get_file_name(const char *p) {
 
 static void show_help(const char *exe) {
 
+        static const char * const sp_names[] =  {
+                [SCHED_OTHER] = "OTHER",
+                [SCHED_BATCH] = "BATCH",
+                [SCHED_FIFO] = "FIFO",
+                [SCHED_RR] = "RR"
+        };
+
         printf("%s [options]\n\n"
                "COMMANDS:\n"
                "  -h, --help                          Show this help\n"
@@ -1803,6 +1815,7 @@ static void show_help(const char *exe) {
                "OPTIONS:\n"
                "      --stderr                        Log to STDERR in addition to syslog\n"
                "      --user-name=USER                Run daemon as user (%s)\n\n"
+               "      --scheduling-policy=(RR|FIFO)   Choose scheduling policy (%s)\n"
                "      --our-realtime-priority=[%i..%i] Realtime priority for the daemon (%u)\n"
                "      --our-nice-level=[%i..%i]      Nice level for the daemon (%i)\n"
                "      --max-realtime-priority=[%i..%i] Max realtime priority for clients (%u)\n"
@@ -1829,9 +1842,10 @@ static void show_help(const char *exe) {
                "      --no-limit-resources            Don't limit daemon's resources\n",
                exe,
                username,
-               sched_get_priority_min(SCHED_RR), sched_get_priority_max(SCHED_RR), our_realtime_priority,
+               sp_names[sched_policy],
+               sched_get_priority_min(sched_policy), sched_get_priority_max(sched_policy), our_realtime_priority,
                PRIO_MIN, PRIO_MAX-1, our_nice_level,
-               sched_get_priority_min(SCHED_RR), sched_get_priority_max(SCHED_RR), max_realtime_priority,
+               sched_get_priority_min(sched_policy), sched_get_priority_max(sched_policy), max_realtime_priority,
                PRIO_MIN, PRIO_MAX-1, min_nice_level,
                rttime_nsec_max,
                users_max,
@@ -1866,13 +1880,26 @@ static int parse_command_line(int argc, char *argv[], int *ret) {
                                 username = optarg;
                                 break;
 
+                        case ARG_SCHEDULING_POLICY:  {
+                                if (strcasecmp(optarg, "rr") == 0)
+                                        sched_policy = SCHED_RR;
+                                else if (strcasecmp(optarg, "fifo") == 0)
+                                        sched_policy = SCHED_FIFO;
+                                else {
+                                        fprintf(stderr, "--scheduling-policy parameter invalid.\n");
+                                        return -1;
+                                }
+
+                                break;
+                        }
+
                         case ARG_OUR_REALTIME_PRIORITY: {
                                 char *e = NULL;
                                 unsigned long u;
 
                                 errno = 0;
                                 u = strtoul(optarg, &e, 0);
-                                if (errno != 0 || !e || *e || u < (unsigned) sched_get_priority_min(SCHED_RR) || u > (unsigned) sched_get_priority_max(SCHED_RR)) {
+                                if (errno != 0 || !e || *e || u < (unsigned) sched_get_priority_min(sched_policy) || u > (unsigned) sched_get_priority_max(sched_policy)) {
                                         fprintf(stderr, "--our-realtime-priority parameter invalid.\n");
                                         return -1;
                                 }
@@ -1900,7 +1927,7 @@ static int parse_command_line(int argc, char *argv[], int *ret) {
 
                                 errno = 0;
                                 u = strtoul(optarg, &e, 0);
-                                if (errno != 0 || !e || *e || u < (unsigned) sched_get_priority_min(SCHED_RR) || u > (unsigned) sched_get_priority_max(SCHED_RR)) {
+                                if (errno != 0 || !e || *e || u < (unsigned) sched_get_priority_min(sched_policy) || u > (unsigned) sched_get_priority_max(sched_policy)) {
                                         fprintf(stderr, "--max-realtime-priority parameter invalid.\n");
                                         return -1;
                                 }
@@ -2099,14 +2126,14 @@ static int parse_command_line(int argc, char *argv[], int *ret) {
                 return -1;
         }
 
-        assert(our_realtime_priority >= (unsigned) sched_get_priority_min(SCHED_RR));
-        assert(our_realtime_priority <= (unsigned) sched_get_priority_max(SCHED_RR));
+        assert(our_realtime_priority >= (unsigned) sched_get_priority_min(sched_policy));
+        assert(our_realtime_priority <= (unsigned) sched_get_priority_max(sched_policy));
 
-        assert(max_realtime_priority >= (unsigned) sched_get_priority_min(SCHED_RR));
-        assert(max_realtime_priority <= (unsigned) sched_get_priority_max(SCHED_RR));
+        assert(max_realtime_priority >= (unsigned) sched_get_priority_min(sched_policy));
+        assert(max_realtime_priority <= (unsigned) sched_get_priority_max(sched_policy));
 
-        assert(canary_watchdog_realtime_priority >= (unsigned) sched_get_priority_min(SCHED_RR));
-        assert(canary_watchdog_realtime_priority <= (unsigned) sched_get_priority_max(SCHED_RR));
+        assert(canary_watchdog_realtime_priority >= (unsigned) sched_get_priority_min(sched_policy));
+        assert(canary_watchdog_realtime_priority <= (unsigned) sched_get_priority_max(sched_policy));
 
         assert(our_nice_level >= PRIO_MIN);
         assert(our_nice_level < PRIO_MAX);

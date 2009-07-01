@@ -154,6 +154,9 @@ static unsigned canary_watchdog_msec = 10000; /* 10s */
 /* Watchdog realtime priority */
 static unsigned canary_watchdog_realtime_priority = 99;
 
+/* How long after the canary died shall we refuse further RT requests? */
+static unsigned canary_refusal_sec = 5*60;
+
 /* Demote root processes? */
 static bool canary_demote_root = FALSE;
 
@@ -197,6 +200,7 @@ static unsigned n_total_threads = 0;
 static const char *proc = NULL;
 static int quit_fd = -1, canary_fd = -1;
 static pthread_t canary_thread_id = 0, watchdog_thread_id = 0;
+static volatile uint32_t refuse_until = 0;
 
 static const char *get_proc_path(void) {
         /* Useful for chroot environments */
@@ -1203,6 +1207,19 @@ finish:
         return ret;
 }
 
+static int verify_canary_refusal(void) {
+        struct timespec now;
+
+        assert_se(clock_gettime(CLOCK_MONOTONIC, &now) == 0);
+
+        if (now.tv_sec < refuse_until) {
+                syslog(LOG_WARNING, "Recovering from system lockup, not allowing further RT threads.\n");
+                return -EPERM;
+        }
+
+        return 0;
+}
+
 static DBusHandlerResult dbus_handler(DBusConnection *c, DBusMessage *m, void *userdata) {
         DBusError error;
         DBusMessage *r = NULL;
@@ -1220,6 +1237,11 @@ static DBusHandlerResult dbus_handler(DBusConnection *c, DBusMessage *m, void *u
                 struct process *p;
                 struct thread *t;
                 int ret;
+
+                if ((ret = verify_canary_refusal()) < 0) {
+                        assert_se(r = dbus_message_new_error_printf(m, translate_error_forward(ret), strerror(-ret)));
+                        goto finish;
+                }
 
                 if (!dbus_message_get_args(m, &error,
                                            DBUS_TYPE_UINT64, &thread,
@@ -1257,6 +1279,11 @@ static DBusHandlerResult dbus_handler(DBusConnection *c, DBusMessage *m, void *u
                 struct process *p;
                 struct thread *t;
                 int ret;
+
+                if ((ret = verify_canary_refusal()) < 0) {
+                        assert_se(r = dbus_message_new_error_printf(m, translate_error_forward(ret), strerror(-ret)));
+                        goto finish;
+                }
 
                 if (!dbus_message_get_args(m, &error,
                                            DBUS_TYPE_UINT64, &thread,
@@ -1501,6 +1528,8 @@ static void* watchdog_thread(void *data) {
                 if (TIMESPEC_MSEC(last_cheep) + canary_watchdog_msec <= TIMESPEC_MSEC(now)) {
                         last_cheep = now;
                         syslog(LOG_WARNING, "The poor little canary died! Taking action.\n");
+                        refuse_until = (uint32_t) now.tv_sec + canary_refusal_sec;
+                        __sync_synchronize();
                         reset_all();
                         continue;
                 }
@@ -1723,6 +1752,7 @@ enum {
         ARG_CANARY_CHEEP_MSEC,
         ARG_CANARY_WATCHDOG_MSEC,
         ARG_CANARY_DEMOTE_ROOT,
+        ARG_CANARY_REFUSE_SEC,
         ARG_STDERR,
         ARG_INTROSPECT
 };
@@ -1749,6 +1779,7 @@ static const struct option long_options[] = {
     { "canary-cheep-msec",           required_argument, 0, ARG_CANARY_CHEEP_MSEC },
     { "canary-watchdog-msec",        required_argument, 0, ARG_CANARY_WATCHDOG_MSEC },
     { "canary-demote-root",          no_argument,       0, ARG_CANARY_DEMOTE_ROOT },
+    { "canary-refuse-sec",           required_argument, 0, ARG_CANARY_REFUSE_SEC },
     { "stderr",                      no_argument,       0, ARG_STDERR },
     { "introspect",                  no_argument,       0, ARG_INTROSPECT },
     { NULL, 0, 0, 0}
@@ -1789,7 +1820,9 @@ static void show_help(const char *exe) {
                "      --canary-cheep-msec=MSEC        Canary cheep interval (%u)\n"
                "      --canary-watchdog-msec=MSEC     Watchdog action delay (%u)\n"
                "      --canary-demote-root            When the canary dies demote root\n"
-               "                                      processes too?\n\n"
+               "                                      processes too?\n"
+               "      --canary-refuse-sec=SEC         How long to refuse further requests\n"
+               "                                      after the canary died (%u)\n\n"
                "      --no-canary                     Don't run a canary-based RT watchdog\n\n"
                "      --no-drop-privileges            Don't drop privileges\n"
                "      --no-chroot                     Don't chroot\n"
@@ -1807,7 +1840,8 @@ static void show_help(const char *exe) {
                actions_burst_sec,
                actions_per_burst_max,
                canary_cheep_msec,
-               canary_watchdog_msec);
+               canary_watchdog_msec,
+               canary_refusal_sec);
 }
 
 static int parse_command_line(int argc, char *argv[], int *ret) {
@@ -2017,6 +2051,20 @@ static int parse_command_line(int argc, char *argv[], int *ret) {
                         case ARG_CANARY_DEMOTE_ROOT:
                                 canary_demote_root = TRUE;
                                 break;
+
+                        case ARG_CANARY_REFUSE_SEC: {
+                                char *e = NULL;
+                                unsigned long u;
+
+                                errno = 0;
+                                u = strtoul(optarg, &e, 0);
+                                if (errno != 0 || !e || *e) {
+                                        fprintf(stderr, "--canary-refuse-sec parameter invalid.\n");
+                                        return -1;
+                                }
+                                canary_refusal_sec = (uint32_t) u;
+                                break;
+                        }
 
                         case ARG_STDERR:
                                 log_stderr = TRUE;

@@ -183,7 +183,7 @@ struct process {
         struct process *next;
 };
 
-struct user {
+struct rtkit_user {
         uid_t uid;
 
         time_t timestamp;
@@ -193,10 +193,10 @@ struct user {
         unsigned n_processes;
         unsigned n_threads;
 
-        struct user *next;
+        struct rtkit_user *next;
 };
 
-static struct user *users = NULL;
+static struct rtkit_user *users = NULL;
 static unsigned n_users = 0;
 static unsigned n_total_processes = 0;
 static unsigned n_total_threads = 0;
@@ -291,7 +291,7 @@ static void free_process(struct process *p) {
         free(p);
 }
 
-static void free_user(struct user *u) {
+static void free_user(struct rtkit_user *u) {
         struct process *p;
 
         while ((p = u->processes)) {
@@ -302,13 +302,13 @@ static void free_user(struct user *u) {
         free(u);
 }
 
-static bool user_in_burst(struct user *u) {
+static bool user_in_burst(struct rtkit_user *u) {
         time_t now = time(NULL);
 
         return now < u->timestamp + actions_burst_sec;
 }
 
-static bool verify_burst(struct user *u) {
+static bool verify_burst(struct rtkit_user *u) {
 
         if (!user_in_burst(u)) {
                 /* Restart burst phase */
@@ -327,8 +327,8 @@ static bool verify_burst(struct user *u) {
         return true;
 }
 
-static int find_user(struct user **_u, uid_t uid) {
-        struct user *u;
+static int find_user(struct rtkit_user **_u, uid_t uid) {
+        struct rtkit_user *u;
 
         for (u = users; u; u = u->next)
                 if (u->uid == uid) {
@@ -341,7 +341,7 @@ static int find_user(struct user **_u, uid_t uid) {
                 return -EBUSY;
         }
 
-        if (!(u = malloc(sizeof(struct user))))
+        if (!(u = malloc(sizeof(struct rtkit_user))))
                 return -ENOMEM;
 
         u->uid = uid;
@@ -357,7 +357,7 @@ static int find_user(struct user **_u, uid_t uid) {
         return 0;
 }
 
-static int find_process(struct process** _p, struct user *u, pid_t pid, unsigned long long starttime) {
+static int find_process(struct process** _p, struct rtkit_user *u, pid_t pid, unsigned long long starttime) {
         struct process *p;
 
         for (p = u->processes; p; p = p->next)
@@ -387,7 +387,7 @@ static int find_process(struct process** _p, struct user *u, pid_t pid, unsigned
         return 0;
 }
 
-static int find_thread(struct thread** _t, struct user *u, struct process *p, pid_t pid, unsigned long long starttime) {
+static int find_thread(struct thread** _t, struct rtkit_user *u, struct process *p, pid_t pid, unsigned long long starttime) {
         struct thread *t;
 
         for (t = p->threads; t; t = t->next)
@@ -472,7 +472,7 @@ static bool thread_relevant(struct process *p, struct thread *t) {
         return FALSE;
 }
 
-static void thread_gc(struct user *u, struct process *p) {
+static void thread_gc(struct rtkit_user *u, struct process *p) {
         struct thread *t, *n, *l;
 
         /* Cleanup dead theads of a specific user we don't need to keep track about anymore */
@@ -499,7 +499,7 @@ static void thread_gc(struct user *u, struct process *p) {
         assert(!p->threads || u->n_threads);
 }
 
-static void process_gc(struct user *u) {
+static void process_gc(struct rtkit_user *u) {
         struct process *p, *n, *l;
 
         /* Cleanup dead processes of a specific user we don't need to keep track about anymore */
@@ -528,7 +528,7 @@ static void process_gc(struct user *u) {
 }
 
 static void user_gc(void) {
-        struct user *u, *n, *l;
+        struct rtkit_user *u, *n, *l;
 
         /* Cleanup all users we don't need to keep track about anymore */
 
@@ -637,7 +637,7 @@ static int verify_process_rttime(struct process *p) {
         return good ? 0 : -EPERM;
 }
 
-static int verify_process_user(struct user *u, struct process *p) {
+static int verify_process_user(struct rtkit_user *u, struct process *p) {
         char fn[128];
         int r;
         struct stat st;
@@ -726,7 +726,7 @@ static char* get_exe_name(pid_t pid, char *exe, size_t len) {
         return exe;
 }
 
-static int process_set_realtime(struct user *u, struct process *p, struct thread *t, unsigned priority) {
+static int process_set_realtime(struct rtkit_user *u, struct process *p, struct thread *t, unsigned priority) {
         int r;
         struct sched_param param;
         char user[64], exe[128];
@@ -796,7 +796,7 @@ finish:
         return r;
 }
 
-static int process_set_high_priority(struct user *u, struct process *p, struct thread *t, int priority) {
+static int process_set_high_priority(struct rtkit_user *u, struct process *p, struct thread *t, int priority) {
         int r;
         struct sched_param param;
         char user[64], exe[128];
@@ -861,7 +861,7 @@ finish:
 }
 
 static void reset_known(void) {
-        struct user *u;
+        struct rtkit_user *u;
         struct process *p;
         struct thread *t;
 
@@ -1024,7 +1024,7 @@ finish:
 }
 
 static int lookup_client(
-                struct user **_u,
+                struct rtkit_user **_u,
                 struct process **_p,
                 struct thread **_t,
                 DBusConnection *c,
@@ -1035,7 +1035,7 @@ static int lookup_client(
         int r;
         unsigned long pid, uid;
         unsigned long long starttime;
-        struct user *u;
+        struct rtkit_user *u;
         struct process *p;
         struct thread *t;
 
@@ -1115,7 +1115,7 @@ static int translate_error_backwards(const char *name) {
         return -EIO;
 }
 
-static int verify_polkit(DBusConnection *c, struct user *u, struct process *p, const char *action) {
+static int verify_polkit(DBusConnection *c, struct rtkit_user *u, struct process *p, const char *action) {
         DBusError error;
         DBusMessage *m = NULL, *r = NULL;
         const char *unix_process = "unix-process";
@@ -1236,7 +1236,7 @@ static DBusHandlerResult dbus_handler(DBusConnection *c, DBusMessage *m, void *u
 
                 uint64_t thread;
                 uint32_t priority;
-                struct user *u;
+                struct rtkit_user *u;
                 struct process *p;
                 struct thread *t;
                 int ret;
@@ -1278,7 +1278,7 @@ static DBusHandlerResult dbus_handler(DBusConnection *c, DBusMessage *m, void *u
 
                 uint64_t thread;
                 int32_t priority;
-                struct user *u;
+                struct rtkit_user *u;
                 struct process *p;
                 struct thread *t;
                 int ret;
@@ -2147,7 +2147,7 @@ static int parse_command_line(int argc, char *argv[], int *ret) {
 int main(int argc, char *argv[]) {
         DBusConnection *bus = NULL;
         int ret = 1;
-        struct user *u;
+        struct rtkit_user *u;
 
         if (parse_command_line(argc, argv, &ret) <= 0)
                 goto finish;

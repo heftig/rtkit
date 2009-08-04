@@ -229,7 +229,7 @@ static char* get_user_name(uid_t uid, char *user, size_t len) {
 }
 
 static int read_starttime(pid_t pid, pid_t tid, unsigned long long *st) {
-        char fn[128];
+        char fn[128], line[256], *p;
         int r;
         FILE *f;
 
@@ -239,14 +239,27 @@ static int read_starttime(pid_t pid, pid_t tid, unsigned long long *st) {
                 assert_se(snprintf(fn, sizeof(fn)-1, "%s/%llu/stat", get_proc_path(), (unsigned long long) pid) < (int) (sizeof(fn)-1));
         fn[sizeof(fn)-1] = 0;
 
-        if (!(f = fopen(fn, "r"))) {
+        if (!(f = fopen(fn, "r")))
+                return -errno;
+
+        if (!(fgets(line, sizeof(line), f))) {
                 r = -errno;
+                fclose(f);
                 return r;
         }
 
-        if (fscanf(f,
-                   "%*d "  /* pid */
-                   "%*s "  /* comm */
+        fclose(f);
+
+        /* Let's skip the pid and comm fields. The latter is enclosed
+         * in () but does not escape any () in its value, so let's
+         * skip over it manually */
+
+        if (!(p = strrchr(line, ')')))
+                return -EIO;
+
+        p++;
+
+        if (sscanf(p, " "
                    "%*c "  /* state */
                    "%*d "  /* ppid */
                    "%*d "  /* pgrp */
@@ -267,12 +280,9 @@ static int read_starttime(pid_t pid, pid_t tid, unsigned long long *st) {
                    "%*d "  /* num_threads */
                    "%*d "  /* itrealvalue */
                    "%llu "  /* starttime */,
-                   st) != 1) {
-                fclose(f);
+                   st) != 1)
                 return -EIO;
-        }
 
-        fclose(f);
         return 0;
 }
 

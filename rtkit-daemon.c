@@ -877,6 +877,9 @@ static void reset_known(void) {
         struct rtkit_user *u;
         struct process *p;
         struct thread *t;
+        unsigned n_demoted = 0;
+
+        syslog(LOG_INFO, "Demoting known real-time threads.\n");
 
         for (u = users; u; u = u->next)
                 for (p = u->processes; p; p = p->next)
@@ -884,7 +887,16 @@ static void reset_known(void) {
                                 if (verify_process_user(u, p) >= 0 &&
                                     verify_process_starttime(p) >= 0 &&
                                     verify_thread_starttime(p, t) >= 0)
-                                        thread_reset(t->pid);
+                                        if (thread_reset(t->pid) >= 0) {
+                                                char exe[64];
+                                                syslog(LOG_NOTICE, "Successfully demoted thread %llu of process %llu (%s).\n",
+                                                       (unsigned long long) t->pid,
+                                                       (unsigned long long) p->pid,
+                                                       get_exe_name(p->pid, exe, sizeof(exe)));
+                                                n_demoted++;
+                                        }
+
+        syslog(LOG_NOTICE, "Demoted %u threads.\n", n_demoted);
 }
 
 static int reset_all(void) {
@@ -895,7 +907,7 @@ static int reset_all(void) {
         /* Goes through /proc and demotes *all* threads to
          * SCHED_OTHER */
 
-        syslog(LOG_INFO, "Demoting real-time threads.\n");
+        syslog(LOG_INFO, "Demoting known and unknown real-time threads.\n");
 
         if (!(pd = opendir(get_proc_path()))) {
                 r = -errno;

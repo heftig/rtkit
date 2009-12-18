@@ -18,16 +18,17 @@
 # You should have received a copy of the GNU General Public License
 # along with RealtimeKit. If not, see <http://www.gnu.org/licenses/>.
 
-AC_PREREQ(2.57)
+AC_PREREQ(2.63)
 
 AC_INIT([rtkit], 0.4, [mzegxvg (at) 0pointer (dot) net])
 AC_CONFIG_SRCDIR([rtkit-daemon.c])
 AC_CONFIG_HEADERS([config.h])
 AC_CONFIG_MACRO_DIR(m4)
 
-AM_INIT_AUTOMAKE([foreign 1.9 -Wall])
+AM_INIT_AUTOMAKE([foreign 1.11 -Wno-portability silent-rules -Wall])
+m4_ifdef([AM_SILENT_RULES], [AM_SILENT_RULES([yes])])
 
-AC_SUBST(PACKAGE_URL, [https://http://git.0pointer.de/?p=librtkit.git])
+AC_SUBST(PACKAGE_URL, [http://git.0pointer.de/?p=rtkit.git])
 
 AC_CANONICAL_HOST
 

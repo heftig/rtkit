@@ -895,7 +895,7 @@ static int reset_all(void) {
         /* Goes through /proc and demotes *all* threads to
          * SCHED_OTHER */
 
-        syslog(LOG_INFO, "Rampaging.\n");
+        syslog(LOG_INFO, "Demoting real-time threads.\n");
 
         if (!(pd = opendir(get_proc_path()))) {
                 r = -errno;
@@ -1543,7 +1543,7 @@ static void* watchdog_thread(void *data) {
 
                 if (TIMESPEC_MSEC(last_cheep) + canary_watchdog_msec <= TIMESPEC_MSEC(now)) {
                         last_cheep = now;
-                        syslog(LOG_WARNING, "The poor little canary died! Taking action.\n");
+                        syslog(LOG_WARNING, "The canary thread is apparently starving. Taking action.\n");
                         refuse_until = (uint32_t) now.tv_sec + canary_refusal_sec;
                         __sync_synchronize();
 

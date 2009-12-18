@@ -160,6 +160,9 @@ static unsigned canary_refusal_sec = 5*60;
 /* Demote root processes? */
 static bool canary_demote_root = FALSE;
 
+/* Demote unknown processes? */
+static bool canary_demote_unknown = FALSE;
+
 /* Log to stderr? */
 static bool log_stderr = FALSE;
 
@@ -1543,7 +1546,11 @@ static void* watchdog_thread(void *data) {
                         syslog(LOG_WARNING, "The poor little canary died! Taking action.\n");
                         refuse_until = (uint32_t) now.tv_sec + canary_refusal_sec;
                         __sync_synchronize();
-                        reset_all();
+
+                        if (canary_demote_unknown)
+                                reset_all();
+                        else
+                                reset_known();
                         continue;
                 }
         }
@@ -1766,6 +1773,7 @@ enum {
         ARG_CANARY_CHEEP_MSEC,
         ARG_CANARY_WATCHDOG_MSEC,
         ARG_CANARY_DEMOTE_ROOT,
+        ARG_CANARY_DEMOTE_UNKNOWN,
         ARG_CANARY_REFUSE_SEC,
         ARG_STDERR,
         ARG_INTROSPECT
@@ -1794,6 +1802,7 @@ static const struct option long_options[] = {
     { "canary-cheep-msec",           required_argument, 0, ARG_CANARY_CHEEP_MSEC },
     { "canary-watchdog-msec",        required_argument, 0, ARG_CANARY_WATCHDOG_MSEC },
     { "canary-demote-root",          no_argument,       0, ARG_CANARY_DEMOTE_ROOT },
+    { "canary-demote-unknown",       no_argument,       0, ARG_CANARY_DEMOTE_UNKNOWN },
     { "canary-refuse-sec",           required_argument, 0, ARG_CANARY_REFUSE_SEC },
     { "stderr",                      no_argument,       0, ARG_STDERR },
     { "introspect",                  no_argument,       0, ARG_INTROSPECT },
@@ -1842,6 +1851,8 @@ static void show_help(const char *exe) {
                "      --actions-per-burst-max=INT     Allow this many requests per burst (%u)\n\n"
                "      --canary-cheep-msec=MSEC        Canary cheep interval (%u)\n"
                "      --canary-watchdog-msec=MSEC     Watchdog action delay (%u)\n"
+               "      --canary-demote-unknown         When the canary dies demote unknown\n"
+               "                                      processes too?\n"
                "      --canary-demote-root            When the canary dies demote root\n"
                "                                      processes too?\n"
                "      --canary-refuse-sec=SEC         How long to refuse further requests\n"
@@ -2087,6 +2098,10 @@ static int parse_command_line(int argc, char *argv[], int *ret) {
 
                         case ARG_CANARY_DEMOTE_ROOT:
                                 canary_demote_root = TRUE;
+                                break;
+
+                        case ARG_CANARY_DEMOTE_UNKNOWN:
+                                canary_demote_unknown = TRUE;
                                 break;
 
                         case ARG_CANARY_REFUSE_SEC: {

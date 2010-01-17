@@ -79,6 +79,16 @@
         "                <method name=\"ResetKnown\"/>\n"               \
         "                <method name=\"ResetAll\"/>\n"                 \
         "                <method name=\"Exit\"/>\n"                     \
+        "                <property name=\"RTTimeNSecMax\" type=\"x\" access=\"read\"/>\n" \
+        "                <property name=\"MaxRealtimePriority\" type=\"i\" access=\"read\"/>\n" \
+        "                <property name=\"MinNiceLevel\" type=\"i\" access=\"read\"/>\n" \
+        "        </interface>\n"                                        \
+        "        <interface name=\"org.freedesktop.DBus.Properties\">\n"\
+        "                <method name=\"Get\">"                         \
+        "                       <arg name=\"interface\" direction=\"in\" type=\"s\"/>\n" \
+        "                       <arg name=\"property\" direction=\"in\" type=\"s\"/>\n" \
+        "                       <arg name=\"value\" direction=\"out\" type=\"v\"/>\n" \
+        "                </method>\n"                                   \
         "        </interface>\n"                                        \
         "        <interface name=\"org.freedesktop.DBus.Introspectable\">\n" \
         "                <method name=\"Introspect\">\n"                \
@@ -1248,6 +1258,37 @@ static int verify_canary_refusal(void) {
         return 0;
 }
 
+static void add_variant(
+        DBusMessage *m,
+        int type,
+        const void *data) {
+
+        DBusMessageIter iter, sub;
+        char t[2];
+
+        t[0] = (char) type;
+        t[1] = 0;
+
+        dbus_message_iter_init_append(m, &iter);
+
+        assert_se(dbus_message_iter_open_container(&iter, DBUS_TYPE_VARIANT, t, &sub));
+        assert_se(dbus_message_iter_append_basic(&sub, type, data));
+        assert_se(dbus_message_iter_close_container(&iter, &sub));
+}
+
+static int handle_dbus_prop_get(const char* property, DBusMessage *r) {
+        if (strcmp(property, "RTTimeNSecMax") == 0)
+                add_variant(r, DBUS_TYPE_INT64, &rttime_nsec_max);
+        else if (strcmp(property, "MaxRealtimePriority") == 0)
+                add_variant(r, DBUS_TYPE_INT32, &max_realtime_priority);
+        else if (strcmp(property, "MinNiceLevel") == 0)
+                add_variant(r, DBUS_TYPE_INT32, &min_nice_level);
+        else
+                return -1;
+
+        return 0;
+}
+
 static DBusHandlerResult dbus_handler(DBusConnection *c, DBusMessage *m, void *userdata) {
         DBusError error;
         DBusMessage *r = NULL;
@@ -1258,7 +1299,6 @@ static DBusHandlerResult dbus_handler(DBusConnection *c, DBusMessage *m, void *u
         user_gc();
 
         if (dbus_message_is_method_call(m, "org.freedesktop.RealtimeKit1", "MakeThreadRealtime")) {
-
                 uint64_t thread;
                 uint32_t priority;
                 struct rtkit_user *u;
@@ -1361,6 +1401,33 @@ static DBusHandlerResult dbus_handler(DBusConnection *c, DBusMessage *m, void *u
                 r = NULL;
 
                 dbus_connection_close(c);
+
+        } else if (dbus_message_is_method_call(m, "org.freedesktop.DBus.Properties", "Get")) {
+                const char *interface, *property;
+
+                if (!dbus_message_get_args(m, &error,
+                                           DBUS_TYPE_STRING, &interface,
+                                           DBUS_TYPE_STRING, &property,
+                                           DBUS_TYPE_INVALID)) {
+
+                        syslog(LOG_DEBUG, "Failed to parse property get call: %s\n", error.message);
+                        assert_se(r = dbus_message_new_error(m, error.name, error.message));
+                        goto finish;
+                }
+
+                if (strcmp(interface, "org.freedesktop.RealtimeKit1") == 0) {
+                        assert_se(r = dbus_message_new_method_return(m));
+
+                        if (!handle_dbus_prop_get(property, r) < 0) {
+                                dbus_message_unref(r);
+                                assert_se(r = dbus_message_new_error_printf(
+                                          m,
+                                          DBUS_ERROR_UNKNOWN_METHOD,
+                                          "Unknown property %s",
+                                          property));
+                        }
+                } else
+                        return DBUS_HANDLER_RESULT_NOT_YET_HANDLED;
 
         } else if (dbus_message_is_method_call(m, "org.freedesktop.DBus.Introspectable", "Introspect")) {
                 const char *xml = INTROSPECT_XML;

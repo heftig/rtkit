@@ -1,0 +1,46 @@
+.\"                                      Hey, EMACS: -*- nroff -*-
+.\" First parameter, NAME, should be all caps
+.\" Second parameter, SECTION, should be 1-8, maybe w/ subsection
+.\" other parameters are allowed: see man(7), man(1)
+.TH RTKITCTL 8 "July 1, 2009"
+.\" Please adjust this date whenever revising the manpage.
+.\"
+.\" Some roff macros, for reference:
+.\" .nh        disable hyphenation
+.\" .hy        enable hyphenation
+.\" .ad l      left justify
+.\" .ad b      justify to both left and right margins
+.\" .nf        disable filling
+.\" .fi        enable filling
+.\" .br        insert line break
+.\" .sp <n>    insert n+1 empty lines
+.\" for manpage-specific macros, see man(7)
+.SH NAME
+rtkitctl \- Realtime Policy and Watchdog daemon control
+.SH SYNOPSIS
+.B rtkitctl
+.RI [ options ]
+.SH DESCRIPTION
+.B RealtimeKit
+is a D-Bus system service that changes the scheduling policy of user processes/threads to SCHED_RR (i.e. realtime scheduling mode) on request. It is intended to be used as a secure mechanism to allow real-time scheduling to be used by normal user processes.
+.SH OPTIONS
+.TP
+.B \-h, \-\-help
+Show a summary of options.
+.TP
+.B \-\-version
+Show version.
+.TP
+.B \-\-reset\-known
+Reset real-time status of known threads.
+.TP
+.B \-\-reset\-all
+Reset real-time status of all threads.
+.TP
+.B \-\-start
+Start RealtimeKit if it is not running already.
+.TP
+.B \-k, \-\-exit
+Terminate running RealtimeKit daemon.
+.SH AUTHOR
+RealtimeKit was written by Lennart Poettering <lennart@poettering.net>.

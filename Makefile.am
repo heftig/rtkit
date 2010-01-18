@@ -68,3 +68,8 @@ rtkit_test_CFLAGS = \
 
 org.freedesktop.RealtimeKit1.service: org.freedesktop.RealtimeKit1.service.in
 	sed -e 's,@LIBEXECDIR\@,$(libexecdir),g' < $< > $@
+
+man8_MANS = rtkitctl.8
+
+EXTRA_DIST += \
+	$(man8_MANS)

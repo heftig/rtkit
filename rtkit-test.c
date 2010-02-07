@@ -76,7 +76,8 @@ static void print_status(const char *t) {
 int main(int argc, char *argv[]) {
         DBusError error;
         DBusConnection *bus;
-        int r;
+        int r, max_realtime_priority, min_nice_level;
+        long long rttime_nsec_max;
         struct rlimit rlim;
 
         dbus_error_init(&error);
@@ -85,6 +86,21 @@ int main(int argc, char *argv[]) {
                 fprintf(stderr, "Failed to connect to system bus: %s\n", error.message);
                 return 1;
         }
+
+        if ((max_realtime_priority = rtkit_get_max_realtime_priority(bus)) < 0)
+                fprintf(stderr, "Failed to retrieve max realtime priority: %s\n", strerror(-max_realtime_priority));
+        else
+                printf("Max realtime priority is: %d\n", max_realtime_priority);
+
+        if ((r = rtkit_get_min_nice_level(bus, &min_nice_level)))
+                fprintf(stderr, "Failed to retrieve min nice level: %s\n", strerror(-r));
+        else
+                printf("Min nice level is: %d\n", min_nice_level);
+
+        if ((rttime_nsec_max = rtkit_get_rttime_nsec_max(bus)) < 0)
+                fprintf(stderr, "Failed to retrieve rttime limit: %s\n", strerror(-rttime_nsec_max));
+        else
+                printf("Rttime limit is: %lld ns\n", rttime_nsec_max);
 
         memset(&rlim, 0, sizeof(rlim));
         rlim.rlim_cur = rlim.rlim_max = 100000000ULL; /* 100ms */
@@ -96,14 +112,14 @@ int main(int argc, char *argv[]) {
         if ((r = rtkit_make_high_priority(bus, 0, -10)) < 0)
                 fprintf(stderr, "Failed to become high priority: %s\n", strerror(-r));
         else
-                printf("Sucessfully became high priority.\n");
+                printf("Successfully became high priority.\n");
 
         print_status("after high priority");
 
         if ((r = rtkit_make_realtime(bus, 0, 10)) < 0)
                 fprintf(stderr, "Failed to become realtime: %s\n", strerror(-r));
         else
-                printf("Sucessfully became realtime.\n");
+                printf("Successfully became realtime.\n");
 
         print_status("after realtime");
 

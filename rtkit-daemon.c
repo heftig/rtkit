@@ -804,7 +804,7 @@ static int process_set_realtime(struct rtkit_user *u, struct process *p, struct 
                 goto finish;
         }
 
-        syslog(LOG_INFO, "Sucessfully made thread %llu of process %llu (%s) owned by '%s' RT at priority %u.\n",
+        syslog(LOG_INFO, "Successfully made thread %llu of process %llu (%s) owned by '%s' RT at priority %u.\n",
                (unsigned long long) t->pid,
                (unsigned long long) p->pid,
                get_exe_name(p->pid, exe, sizeof(exe)),
@@ -868,7 +868,7 @@ static int process_set_high_priority(struct rtkit_user *u, struct process *p, st
                 goto finish;
         }
 
-        syslog(LOG_INFO, "Sucessfully made thread %llu of process %llu (%s) owned by '%s' high priority at nice level %i.\n",
+        syslog(LOG_INFO, "Successfully made thread %llu of process %llu (%s) owned by '%s' high priority at nice level %i.\n",
                (unsigned long long) t->pid,
                (unsigned long long) p->pid,
                get_exe_name(p->pid, exe, sizeof(exe)),
@@ -1719,7 +1719,7 @@ static int drop_privileges(void) {
                 }
                 proc = "/";
 
-                syslog(LOG_DEBUG, "Sucessfully called chroot.\n");
+                syslog(LOG_DEBUG, "Successfully called chroot.\n");
         }
 
         if (do_drop_privileges) {
@@ -1772,7 +1772,7 @@ static int drop_privileges(void) {
                 setenv("LOGNAME", username, 1);
                 setenv("HOME", get_proc_path(), 1);
 
-                syslog(LOG_DEBUG, "Sucessfully dropped privileges.\n");
+                syslog(LOG_DEBUG, "Successfully dropped privileges.\n");
         }
 
         return 0;
@@ -1825,7 +1825,7 @@ static int set_resource_limits(void) {
                 }
         }
 
-        syslog(LOG_DEBUG, "Sucessfully limited resources.\n");
+        syslog(LOG_DEBUG, "Successfully limited resources.\n");
 
         return 0;
 }

@@ -4,6 +4,7 @@
   This file is part of RealtimeKit.
 
   Copyright 2009 Lennart Poettering
+  Copyright 2010 Maarten Lankhorst
 
   RealtimeKit is free software: you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -72,7 +73,17 @@
         "                        <arg name=\"thread\" type=\"t\" direction=\"in\"/>\n" \
         "                        <arg name=\"priority\" type=\"u\" direction=\"in\"/>\n" \
         "                </method>\n"                                   \
+        "                <method name=\"MakeThreadRealtimeWithPID\">\n"        \
+        "                        <arg name=\"process\" type=\"t\" direction=\"in\"/>\n" \
+        "                        <arg name=\"thread\" type=\"t\" direction=\"in\"/>\n" \
+        "                        <arg name=\"priority\" type=\"u\" direction=\"in\"/>\n" \
+        "                </method>\n"                                   \
         "                <method name=\"MakeHighPriority\">\n"          \
+        "                        <arg name=\"thread\" type=\"t\" direction=\"in\"/>\n" \
+        "                        <arg name=\"priority\" type=\"i\" direction=\"in\"/>\n" \
+        "                </method>\n"                                   \
+        "                <method name=\"MakeHighPriorityWithPID\">\n"          \
+        "                        <arg name=\"process\" type=\"t\" direction=\"in\"/>\n" \
         "                        <arg name=\"thread\" type=\"t\" direction=\"in\"/>\n" \
         "                        <arg name=\"priority\" type=\"i\" direction=\"in\"/>\n" \
         "                </method>\n"                                   \
@@ -1064,11 +1075,12 @@ static int lookup_client(
                 struct thread **_t,
                 DBusConnection *c,
                 DBusMessage *m,
+                pid_t pid,
                 pid_t tid) {
 
         DBusError error;
         int r;
-        unsigned long pid, uid;
+        unsigned long uid;
         unsigned long long starttime;
         struct rtkit_user *u;
         struct process *p;
@@ -1083,7 +1095,8 @@ static int lookup_client(
                 goto fail;
         }
 
-        if ((pid = get_unix_process_id(c, dbus_message_get_sender(m), &error)) == (unsigned long) -1) {
+        if (pid == (pid_t) -1 &&
+            (pid = get_unix_process_id(c, dbus_message_get_sender(m), &error)) == (pid_t) -1) {
                 syslog(LOG_ERR, "get_unix_process_id() failed: %s\n", error.message);
                 r = -EIO;
                 goto fail;
@@ -1292,14 +1305,16 @@ static int handle_dbus_prop_get(const char* property, DBusMessage *r) {
 static DBusHandlerResult dbus_handler(DBusConnection *c, DBusMessage *m, void *userdata) {
         DBusError error;
         DBusMessage *r = NULL;
+        int is2 = 0;
 
         dbus_error_init(&error);
 
         /* We garbage collect on every user call */
         user_gc();
 
-        if (dbus_message_is_method_call(m, "org.freedesktop.RealtimeKit1", "MakeThreadRealtime")) {
-                uint64_t thread;
+        if (dbus_message_is_method_call(m, "org.freedesktop.RealtimeKit1", "MakeThreadRealtime") ||
+            (is2 = dbus_message_is_method_call(m, "org.freedesktop.RealtimeKit1", "MakeThreadRealtimeWithPID"))) {
+                uint64_t thread, process = (uint64_t) -1;
                 uint32_t priority;
                 struct rtkit_user *u;
                 struct process *p;
@@ -1311,18 +1326,27 @@ static DBusHandlerResult dbus_handler(DBusConnection *c, DBusMessage *m, void *u
                         goto finish;
                 }
 
-                if (!dbus_message_get_args(m, &error,
-                                           DBUS_TYPE_UINT64, &thread,
-                                           DBUS_TYPE_UINT32, &priority,
-                                           DBUS_TYPE_INVALID)) {
+                if (is2)
+                        ret = dbus_message_get_args(m, &error,
+                                                    DBUS_TYPE_UINT64, &process,
+                                                    DBUS_TYPE_UINT64, &thread,
+                                                    DBUS_TYPE_UINT32, &priority,
+                                                    DBUS_TYPE_INVALID);
+                else
+                        ret = dbus_message_get_args(m, &error,
+                                                    DBUS_TYPE_UINT64, &thread,
+                                                    DBUS_TYPE_UINT32, &priority,
+                                                    DBUS_TYPE_INVALID);
 
+                if (!ret) {
                         syslog(LOG_DEBUG, "Failed to parse MakeThreadRealtime() method call: %s\n", error.message);
                         assert_se(r = dbus_message_new_error(m, error.name, error.message));
 
                         goto finish;
                 }
 
-                if ((ret = lookup_client(&u, &p, &t, c, m, (pid_t) thread)) < 0) {
+                if ((ret = lookup_client(&u, &p, &t, c, m, (pid_t)process, (pid_t) thread)) < 0) {
+                        syslog(LOG_DEBUG, "Failed to look up client: %s\n", strerror(-ret));
                         assert_se(r = dbus_message_new_error_printf(m, translate_error_forward(ret), strerror(-ret)));
                         goto finish;
                 }
@@ -1339,9 +1363,10 @@ static DBusHandlerResult dbus_handler(DBusConnection *c, DBusMessage *m, void *u
 
                 assert_se(r = dbus_message_new_method_return(m));
 
-        } else if (dbus_message_is_method_call(m, "org.freedesktop.RealtimeKit1", "MakeThreadHighPriority")) {
+        } else if (dbus_message_is_method_call(m, "org.freedesktop.RealtimeKit1", "MakeThreadHighPriority")
+                   || (is2 = dbus_message_is_method_call(m, "org.freedesktop.RealtimeKit1", "MakeThreadHighPriorityWithPID"))) {
 
-                uint64_t thread;
+                uint64_t thread, process = (uint64_t) -1;
                 int32_t priority;
                 struct rtkit_user *u;
                 struct process *p;
@@ -1353,18 +1378,27 @@ static DBusHandlerResult dbus_handler(DBusConnection *c, DBusMessage *m, void *u
                         goto finish;
                 }
 
-                if (!dbus_message_get_args(m, &error,
-                                           DBUS_TYPE_UINT64, &thread,
-                                           DBUS_TYPE_INT32, &priority,
-                                           DBUS_TYPE_INVALID)) {
+                if (is2)
+                        ret = dbus_message_get_args(m, &error,
+                                                    DBUS_TYPE_UINT64, &process,
+                                                    DBUS_TYPE_UINT64, &thread,
+                                                    DBUS_TYPE_INT32, &priority,
+                                                    DBUS_TYPE_INVALID);
+                else
+                        ret = dbus_message_get_args(m, &error,
+                                                    DBUS_TYPE_UINT64, &thread,
+                                                    DBUS_TYPE_INT32, &priority,
+                                                    DBUS_TYPE_INVALID);
 
+                if (!ret) {
                         syslog(LOG_DEBUG, "Failed to parse MakeThreadHighPriority() method call: %s\n", error.message);
                         assert_se(r = dbus_message_new_error(m, error.name, error.message));
 
                         goto finish;
                 }
 
-                if ((ret = lookup_client(&u, &p, &t, c, m, (pid_t) thread)) < 0) {
+                if ((ret = lookup_client(&u, &p, &t, c, m, (pid_t)process, (pid_t) thread)) < 0) {
+                        syslog(LOG_DEBUG, "Failed to look up client: %s\n", strerror(-ret));
                         assert_se(r = dbus_message_new_error_printf(m, translate_error_forward(ret), strerror(-ret)));
                         goto finish;
                 }

@@ -2286,6 +2286,7 @@ int main(int argc, char *argv[]) {
         DBusConnection *bus = NULL;
         int ret = 1;
         struct rtkit_user *u;
+        unsigned long slack_ns;
 
         if (parse_command_line(argc, argv, &ret) <= 0)
                 goto finish;
@@ -2298,6 +2299,12 @@ int main(int argc, char *argv[]) {
         openlog(get_file_name(argv[0]),
                 LOG_NDELAY|LOG_PID|(log_stderr ? LOG_PERROR : 0),
                 LOG_DAEMON);
+
+        /* Raise our timer slack, we don't really need to be woken up
+         * on time. */
+        slack_ns = (((unsigned long) canary_watchdog_msec - (unsigned long) canary_cheep_msec) / 2UL) * 1000000UL;
+        if (prctl(PR_SET_TIMERSLACK, slack_ns) < 0)
+                syslog(LOG_WARNING, "PRT_SET_TIMERSLACK failed: %s\n", strerror(errno));
 
         self_drop_realtime(our_nice_level);
 

@@ -1,6 +1,6 @@
 # This file is part of RealtimeKit.
 #
-# Copyright 2009 Lennart Poettering
+# Copyright 2010 Lennart Poettering
 #
 # RealtimeKit is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -15,8 +15,14 @@
 # You should have received a copy of the GNU General Public License
 # along with RealtimeKit. If not, see <http://www.gnu.org/licenses/>.
 
-[D-BUS Service]
-Name=org.freedesktop.RealtimeKit1
+[Unit]
+Requires=basic.target
+After=basic.target syslog.target
+
+[Service]
 Exec=@LIBEXECDIR@/rtkit-daemon
-SystemdService=rtkit-daemon.service
-User=root
+Type=dbus
+BusName=org.freedesktop.RealtimeKit1
+
+[Install]
+WantedBy=graphical.target

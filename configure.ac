@@ -89,6 +89,13 @@ AC_SEARCH_LIBS([cap_init], [cap])
 
 PKG_CHECK_MODULES(DBUS, dbus-1)
 
+AC_ARG_WITH([systemdsystemunitdir],
+        AS_HELP_STRING([--with-systemdsystemunitdir=DIR], [Directory for systemd service files]),
+        [],
+        [with_systemdsystemunitdir=$($PKG_CONFIG --variable=systemdsystemunitdir systemd)])
+AC_SUBST([systemdsystemunitdir], [$with_systemdsystemunitdir])
+AM_CONDITIONAL(HAVE_SYSTEMD, [test -n "$with_systemdsystemunitdir"])
+
 ###################################
 #            Output               #
 ###################################
@@ -106,4 +113,5 @@ echo "
     localstatedir:          ${localstatedir}
     Compiler:               ${CC}
     CFLAGS:                 ${CFLAGS}
+    systemd unit directory: ${systemdsystemunitdir}
 "

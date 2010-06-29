@@ -27,10 +27,12 @@ EXTRA_DIST = \
 	LICENSE \
 	org.freedesktop.RealtimeKit1.policy \
 	org.freedesktop.RealtimeKit1.conf \
-	org.freedesktop.RealtimeKit1.service.in
+	org.freedesktop.RealtimeKit1.service.in \
+	rtkit-daemon.service.in
 
 CLEANFILES = \
-	org.freedesktop.RealtimeKit1.service
+	org.freedesktop.RealtimeKit1.service \
+	rtkit-daemon.service
 
 libexec_PROGRAMS = \
 	rtkit-daemon
@@ -44,6 +46,11 @@ dbussystem_DATA = \
 	org.freedesktop.RealtimeKit1.conf
 dbusservice_DATA = \
 	org.freedesktop.RealtimeKit1.service
+
+if HAVE_SYSTEMD
+systemdsystemunit_DATA = \
+	rtkit-daemon.service
+endif
 
 rtkit_daemon_SOURCES = \
 	rtkit-daemon.c rtkit.h
@@ -67,7 +74,10 @@ rtkit_test_CFLAGS = \
 	$(DBUS_CFLAGS)
 
 org.freedesktop.RealtimeKit1.service: org.freedesktop.RealtimeKit1.service.in
-	sed -e 's,@LIBEXECDIR\@,$(libexecdir),g' < $< > $@
+	$(AM_V_GEN)sed -e 's,@LIBEXECDIR\@,$(libexecdir),g' < $< > $@
+
+rtkit-daemon.service: rtkit-daemon.service.in
+	$(AM_V_GEN)sed -e 's,@LIBEXECDIR\@,$(libexecdir),g' < $< > $@
 
 man8_MANS = rtkitctl.8
 

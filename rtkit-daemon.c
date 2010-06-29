@@ -339,7 +339,7 @@ static void free_user(struct rtkit_user *u) {
 static bool user_in_burst(struct rtkit_user *u) {
         time_t now = time(NULL);
 
-        return now < u->timestamp + actions_burst_sec;
+        return now < u->timestamp + (time_t) actions_burst_sec;
 }
 
 static bool verify_burst(struct rtkit_user *u) {
@@ -1263,7 +1263,7 @@ static int verify_canary_refusal(void) {
 
         assert_se(clock_gettime(CLOCK_MONOTONIC, &now) == 0);
 
-        if (now.tv_sec < refuse_until) {
+        if (now.tv_sec < (time_t) refuse_until) {
                 syslog(LOG_WARNING, "Recovering from system lockup, not allowing further RT threads.\n");
                 return -EPERM;
         }

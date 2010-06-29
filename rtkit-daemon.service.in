@@ -20,7 +20,7 @@ Requires=basic.target
 After=basic.target syslog.target
 
 [Service]
-Exec=@LIBEXECDIR@/rtkit-daemon
+ExecStart=@LIBEXECDIR@/rtkit-daemon
 Type=dbus
 BusName=org.freedesktop.RealtimeKit1
 

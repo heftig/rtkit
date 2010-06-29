@@ -83,3 +83,6 @@ man8_MANS = rtkitctl.8
 
 EXTRA_DIST += \
 	$(man8_MANS)
+
+DISTCHECK_CONFIGURE_FLAGS = \
+	--with-systemdsystemunitdir=$$dc_install_base/$(systemdsystemunitdir)

@@ -18,6 +18,7 @@
 [Unit]
 Requires=basic.target
 After=basic.target syslog.target
+Description=RealtimeKit Scheduling Policy Service
 
 [Service]
 ExecStart=@LIBEXECDIR@/rtkit-daemon

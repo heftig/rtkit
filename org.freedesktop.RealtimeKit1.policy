@@ -7,7 +7,9 @@
 
   <action id="org.freedesktop.RealtimeKit1.acquire-high-priority">
     <description>Grant high priority scheduling to a user process</description>
+    <description xml:lang="tr">Bir sürece yüksek öncelikli çalışabilme yetkisi ver</description>
     <message>Authentication is required to grant an application high priority scheduling</message>
+    <message xml:lang="tr">Sürecin yüksek öncelikli çalıştırılabilmesi için yetki gerekiyor</message>
     <defaults>
       <allow_any>no</allow_any>
       <allow_inactive>yes</allow_inactive>
@@ -17,7 +19,9 @@
 
   <action id="org.freedesktop.RealtimeKit1.acquire-real-time">
     <description>Grant realtime scheduling to a user process</description>
+    <description xml:lang="tr">Bir sürece gerçek zamanlı çalışabilme yetkisi ver</description>
     <message>Authentication is required to grant an application realtime scheduling</message>
+    <message xml:lang="tr">Sürecin gerçek zamanlı çalıştırılabilmesi için yetki gerekiyor</message>
     <defaults>
       <allow_any>no</allow_any>
       <allow_inactive>yes</allow_inactive>

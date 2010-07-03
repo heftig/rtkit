@@ -16,9 +16,8 @@
 # along with RealtimeKit. If not, see <http://www.gnu.org/licenses/>.
 
 [Unit]
-Requires=basic.target
-After=basic.target syslog.target
 Description=RealtimeKit Scheduling Policy Service
+After=syslog.target
 
 [Service]
 ExecStart=@LIBEXECDIR@/rtkit-daemon

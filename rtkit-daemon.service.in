@@ -23,6 +23,7 @@ After=syslog.target
 ExecStart=@LIBEXECDIR@/rtkit-daemon
 Type=dbus
 BusName=org.freedesktop.RealtimeKit1
+NotifyAccess=main
 
 [Install]
 WantedBy=graphical.target

@@ -53,7 +53,8 @@ systemdsystemunit_DATA = \
 endif
 
 rtkit_daemon_SOURCES = \
-	rtkit-daemon.c rtkit.h
+	rtkit-daemon.c rtkit.h \
+	sd-daemon.c sd-daemon.h
 rtkit_daemon_LDADD = \
 	$(DBUS_LIBS)
 rtkit_daemon_CFLAGS = \
@@ -86,3 +87,7 @@ EXTRA_DIST += \
 
 DISTCHECK_CONFIGURE_FLAGS = \
 	--with-systemdsystemunitdir=$$dc_install_base/$(systemdsystemunitdir)
+
+update-systemd:
+	curl http://cgit.freedesktop.org/systemd/plain/src/sd-daemon.c > sd-daemon.c
+	curl http://cgit.freedesktop.org/systemd/plain/src/sd-daemon.h > sd-daemon.h

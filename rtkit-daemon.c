@@ -51,6 +51,7 @@
 #include <syslog.h>
 
 #include "rtkit.h"
+#include "sd-daemon.h"
 
 #ifndef __linux__
 #error "This stuff only works on Linux!"
@@ -1479,8 +1480,13 @@ static DBusHandlerResult dbus_handler(DBusConnection *c, DBusMessage *m, void *u
                 n_total_processes,
                 n_users);
 
-finish:
+        sd_notifyf(0,
+                   "STATUS=Supervising %u threads of %u processes of %u users.",
+                   n_total_threads,
+                   n_total_processes,
+                   n_users);
 
+finish:
         if (r) {
                 assert_se(dbus_connection_send(c, r, NULL));
                 dbus_message_unref(r);
@@ -2323,6 +2329,8 @@ int main(int argc, char *argv[]) {
         umask(0777);
 
         syslog(LOG_DEBUG, "Running.\n");
+
+        sd_notify(0, "STATUS=Running.");
 
         dbus_connection_set_exit_on_disconnect(bus, FALSE);
 

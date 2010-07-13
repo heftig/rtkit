@@ -20,7 +20,7 @@
 
 AC_PREREQ(2.63)
 
-AC_INIT([rtkit], 0.8, [mzegxvg (at) 0pointer (dot) net])
+AC_INIT([rtkit], 0.9, [mzegxvg (at) 0pointer (dot) net])
 AC_CONFIG_SRCDIR([rtkit-daemon.c])
 AC_CONFIG_HEADERS([config.h])
 AC_CONFIG_MACRO_DIR(m4)

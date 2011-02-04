@@ -24,6 +24,7 @@ ExecStart=@LIBEXECDIR@/rtkit-daemon
 Type=dbus
 BusName=org.freedesktop.RealtimeKit1
 NotifyAccess=main
+ControlGroup=cpu:/
 
 [Install]
 WantedBy=graphical.target

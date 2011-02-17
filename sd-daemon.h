@@ -1,4 +1,4 @@
-/*-*- Mode: C; c-basic-offset: 8 -*-*/
+/*-*- Mode: C; c-basic-offset: 8; indent-tabs-mode: nil -*-*/
 
 #ifndef foosddaemonhfoo
 #define foosddaemonhfoo
@@ -67,12 +67,20 @@ extern "C" {
   See sd-daemon(7) for more information.
 */
 
+#ifndef _sd_printf_attr_
 #if __GNUC__ >= 4
 #define _sd_printf_attr_(a,b) __attribute__ ((format (printf, a, b)))
-#define _sd_hidden_ __attribute__ ((visibility("hidden")))
 #else
 #define _sd_printf_attr_(a,b)
+#endif
+#endif
+
+#ifndef _sd_hidden_
+#if (__GNUC__ >= 4) && !defined(SD_EXPORT_SYMBOLS)
+#define _sd_hidden_ __attribute__ ((visibility("hidden")))
+#else
 #define _sd_hidden_
+#endif
 #endif
 
 /*
@@ -171,7 +179,7 @@ int sd_is_socket_unix(int fd, int type, int listening, const char *path, size_t 
 
 /*
   Informs systemd about changed daemon state. This takes a number of
-  newline seperated environment-style variable assignments in a
+  newline separated environment-style variable assignments in a
   string. The following variables are known:
 
      READY=1      Tells systemd that daemon startup is finished (only
@@ -244,7 +252,7 @@ int sd_notifyf(int unset_environment, const char *format, ...) _sd_printf_attr_(
   fine. You should NOT protect them with a call to this function. Also
   note that this function checks whether the system, not the user
   session is controlled by systemd. However the functions above work
-  for both session and system services.
+  for both user and system services.
 
   See sd_booted(3) for more information.
 */

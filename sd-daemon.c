@@ -1,4 +1,4 @@
-/*-*- Mode: C; c-basic-offset: 8 -*-*/
+/*-*- Mode: C; c-basic-offset: 8; indent-tabs-mode: nil -*-*/
 
 /***
   Copyright 2010 Lennart Poettering
@@ -40,6 +40,7 @@
 #include <string.h>
 #include <stdarg.h>
 #include <stdio.h>
+#include <stddef.h>
 
 #include "sd-daemon.h"
 
@@ -307,17 +308,17 @@ int sd_is_socket_unix(int fd, int type, int listening, const char *path, size_t 
 
                 if (length <= 0)
                         /* Unnamed socket */
-                        return l == sizeof(sa_family_t);
+                        return l == offsetof(struct sockaddr_un, sun_path);
 
                 if (path[0])
                         /* Normal path socket */
                         return
-                                (l >= sizeof(sa_family_t) + length + 1) &&
+                                (l >= offsetof(struct sockaddr_un, sun_path) + length + 1) &&
                                 memcmp(path, sockaddr.un.sun_path, length+1) == 0;
                 else
                         /* Abstract namespace socket */
                         return
-                                (l == sizeof(sa_family_t) + length) &&
+                                (l == offsetof(struct sockaddr_un, sun_path) + length) &&
                                 memcmp(path, sockaddr.un.sun_path, length) == 0;
         }
 
@@ -325,18 +326,13 @@ int sd_is_socket_unix(int fd, int type, int listening, const char *path, size_t 
 }
 
 int sd_notify(int unset_environment, const char *state) {
-#if defined(DISABLE_SYSTEMD) || !defined(__linux__)
+#if defined(DISABLE_SYSTEMD) || !defined(__linux__) || !defined(SOCK_CLOEXEC)
         return 0;
 #else
         int fd = -1, r;
         struct msghdr msghdr;
         struct iovec iovec;
         union sockaddr_union sockaddr;
-        struct ucred *ucred;
-        union {
-                struct cmsghdr cmsghdr;
-                uint8_t buf[CMSG_SPACE(sizeof(struct ucred))];
-        } control;
         const char *e;
 
         if (!state) {
@@ -369,27 +365,15 @@ int sd_notify(int unset_environment, const char *state) {
         iovec.iov_base = (char*) state;
         iovec.iov_len = strlen(state);
 
-        memset(&control, 0, sizeof(control));
-        control.cmsghdr.cmsg_level = SOL_SOCKET;
-        control.cmsghdr.cmsg_type = SCM_CREDENTIALS;
-        control.cmsghdr.cmsg_len = CMSG_LEN(sizeof(struct ucred));
-
-        ucred = (struct ucred*) CMSG_DATA(&control.cmsghdr);
-        ucred->pid = getpid();
-        ucred->uid = getuid();
-        ucred->gid = getgid();
-
         memset(&msghdr, 0, sizeof(msghdr));
         msghdr.msg_name = &sockaddr;
-        msghdr.msg_namelen = sizeof(sa_family_t) + strlen(e);
+        msghdr.msg_namelen = offsetof(struct sockaddr_un, sun_path) + strlen(e);
 
         if (msghdr.msg_namelen > sizeof(struct sockaddr_un))
                 msghdr.msg_namelen = sizeof(struct sockaddr_un);
 
         msghdr.msg_iov = &iovec;
         msghdr.msg_iovlen = 1;
-        msghdr.msg_control = &control;
-        msghdr.msg_controllen = control.cmsghdr.cmsg_len;
 
         if (sendmsg(fd, &msghdr, MSG_NOSIGNAL) < 0) {
                 r = -errno;
@@ -441,10 +425,10 @@ int sd_booted(void) {
         /* We simply test whether the systemd cgroup hierarchy is
          * mounted */
 
-        if (lstat("/cgroup", &a) < 0)
+        if (lstat("/sys/fs/cgroup", &a) < 0)
                 return 0;
 
-        if (lstat("/cgroup/systemd", &b) < 0)
+        if (lstat("/sys/fs/cgroup/systemd", &b) < 0)
                 return 0;
 
         return a.st_dev != b.st_dev;

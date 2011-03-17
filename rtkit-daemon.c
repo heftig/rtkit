@@ -1763,21 +1763,38 @@ static int drop_privileges(void) {
         }
 
         if (do_drop_privileges) {
-                cap_t caps;
-                const cap_value_t cap_values[] = {
+                static const cap_value_t cap_values[] = {
                         CAP_SYS_NICE,             /* Needed for obvious reasons */
                         CAP_DAC_READ_SEARCH,      /* Needed so that we can verify resource limits */
                         CAP_SYS_PTRACE            /* Needed so that we can read /proc/$$/exe. Linux is weird. */
                 };
 
-                /* Third, say that we want to keep caps */
+                cap_value_t c;
+                cap_t caps;
+
+                /* Third, reduce bounding set */
+                for (c = 0; c <= CAP_LAST_CAP; c++) {
+                        unsigned u;
+                        bool keep = false;
+
+                        for (u = 0; u < ELEMENTSOF(cap_values); u++)
+                                if (cap_values[u] == c) {
+                                        keep = true;
+                                        break;
+                                }
+
+                        if (!keep)
+                                assert_se(prctl(PR_CAPBSET_DROP, c) == 0);
+                }
+
+                /* Fourth, say that we want to keep caps */
                 if (prctl(PR_SET_KEEPCAPS, 1) < 0) {
                         r = -errno;
                         syslog(LOG_ERR, "PR_SET_KEEPCAPS failed: %s\n", strerror(errno));
                         return r;
                 }
 
-                /* Fourth, drop privs */
+                /* Fifth, drop privs */
                 if (setresgid(pw->pw_gid, pw->pw_gid, pw->pw_gid) < 0 ||
                     setresuid(pw->pw_uid, pw->pw_uid, pw->pw_uid) < 0) {
                         r = -errno;
@@ -1785,14 +1802,14 @@ static int drop_privileges(void) {
                         return r;
                 }
 
-                /* Fifth, reset caps flag */
+                /* Sixth, reset caps flag */
                 if (prctl(PR_SET_KEEPCAPS, 0) < 0) {
                         r = -errno;
                         syslog(LOG_ERR, "PR_SET_KEEPCAPS failed: %s\n", strerror(errno));
                         return r;
                 }
 
-                /* Sixth, reduce caps */
+                /* Seventh, reduce caps */
                 assert_se(caps = cap_init());
                 assert_se(cap_clear(caps) == 0);
                 assert_se(cap_set_flag(caps, CAP_EFFECTIVE, ELEMENTSOF(cap_values), cap_values, CAP_SET) == 0);
@@ -1806,7 +1823,7 @@ static int drop_privileges(void) {
 
                 assert_se(cap_free(caps) == 0);
 
-                /* Seventh, update environment */
+                /* Eigth, update environment */
                 setenv("USER", username, 1);
                 setenv("USERNAME", username, 1);
                 setenv("LOGNAME", username, 1);

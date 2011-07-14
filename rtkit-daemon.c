@@ -1770,11 +1770,16 @@ static int drop_privileges(void) {
                         CAP_SYS_PTRACE            /* Needed so that we can read /proc/$$/exe. Linux is weird. */
                 };
 
-                cap_value_t c;
+                cap_value_t c, m;
                 cap_t caps;
 
+                m = CAP_LAST_CAP;
+                /* In case the number of caps in the kernel is increased, drop them too */
+                if (m < 63)
+                        m = 63;
+
                 /* Third, reduce bounding set */
-                for (c = 0; c <= CAP_LAST_CAP; c++) {
+                for (c = 0; c <= m; c++) {
                         unsigned u;
                         bool keep = false;
 
@@ -1785,7 +1790,7 @@ static int drop_privileges(void) {
                                 }
 
                         if (!keep)
-                                assert_se(prctl(PR_CAPBSET_DROP, c) == 0);
+                                assert_se(prctl(PR_CAPBSET_DROP, c) == 0 || errno == EINVAL);
                 }
 
                 /* Fourth, say that we want to keep caps */

@@ -49,6 +49,7 @@
 #include <pthread.h>
 #include <dirent.h>
 #include <syslog.h>
+#include <grp.h>
 
 #include "rtkit.h"
 #include "sd-daemon.h"
@@ -1795,7 +1796,8 @@ static int drop_privileges(void) {
                 }
 
                 /* Fifth, drop privs */
-                if (setresgid(pw->pw_gid, pw->pw_gid, pw->pw_gid) < 0 ||
+                if (setgroups(0, NULL) < 0 ||
+                    setresgid(pw->pw_gid, pw->pw_gid, pw->pw_gid) < 0 ||
                     setresuid(pw->pw_uid, pw->pw_uid, pw->pw_uid) < 0) {
                         r = -errno;
                         syslog(LOG_ERR, "Failed to become %s: %s\n", username, strerror(errno));

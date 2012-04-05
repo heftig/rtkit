@@ -80,11 +80,11 @@
         "                        <arg name=\"thread\" type=\"t\" direction=\"in\"/>\n" \
         "                        <arg name=\"priority\" type=\"u\" direction=\"in\"/>\n" \
         "                </method>\n"                                   \
-        "                <method name=\"MakeHighPriority\">\n"          \
+        "                <method name=\"MakeThreadHighPriority\">\n"          \
         "                        <arg name=\"thread\" type=\"t\" direction=\"in\"/>\n" \
         "                        <arg name=\"priority\" type=\"i\" direction=\"in\"/>\n" \
         "                </method>\n"                                   \
-        "                <method name=\"MakeHighPriorityWithPID\">\n"          \
+        "                <method name=\"MakeThreadHighPriorityWithPID\">\n"          \
         "                        <arg name=\"process\" type=\"t\" direction=\"in\"/>\n" \
         "                        <arg name=\"thread\" type=\"t\" direction=\"in\"/>\n" \
         "                        <arg name=\"priority\" type=\"i\" direction=\"in\"/>\n" \

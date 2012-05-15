@@ -15,6 +15,9 @@
 # You should have received a copy of the GNU General Public License
 # along with RealtimeKit. If not, see <http://www.gnu.org/licenses/>.
 
+AM_CFLAGS = $(WARNINGFLAGS) $(PTHREAD_CFLAGS)
+AM_LDFLAGS = $(GCLDFLAGS)
+
 ACLOCAL_AMFLAGS = -I m4
 
 policykitdir = $(datadir)/polkit-1/actions/
@@ -58,6 +61,7 @@ rtkit_daemon_SOURCES = \
 rtkit_daemon_LDADD = \
 	$(DBUS_LIBS)
 rtkit_daemon_CFLAGS = \
+	$(AM_CFLAGS) \
 	$(DBUS_CFLAGS)
 
 rtkitctl_SOURCES = \
@@ -65,6 +69,7 @@ rtkitctl_SOURCES = \
 rtkitctl_LDADD = \
 	$(DBUS_LIBS)
 rtkitctl_CFLAGS = \
+	$(AM_CFLAGS) \
 	$(DBUS_CFLAGS)
 
 rtkit_test_SOURCES = \
@@ -72,6 +77,7 @@ rtkit_test_SOURCES = \
 rtkit_test_LDADD = \
 	$(DBUS_LIBS)
 rtkit_test_CFLAGS = \
+	$(AM_CFLAGS) \
 	$(DBUS_CFLAGS)
 
 org.freedesktop.RealtimeKit1.service: org.freedesktop.RealtimeKit1.service.in

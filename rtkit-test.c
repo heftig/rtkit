@@ -77,7 +77,7 @@ int main(int argc, char *argv[]) {
         DBusError error;
         DBusConnection *bus;
         int r, max_realtime_priority, min_nice_level;
-        long long rttime_nsec_max;
+        long long rttime_usec_max;
         struct rlimit rlim;
 
         dbus_error_init(&error);
@@ -97,10 +97,10 @@ int main(int argc, char *argv[]) {
         else
                 printf("Min nice level is: %d\n", min_nice_level);
 
-        if ((rttime_nsec_max = rtkit_get_rttime_nsec_max(bus)) < 0)
-                fprintf(stderr, "Failed to retrieve rttime limit: %s\n", strerror(-rttime_nsec_max));
+        if ((rttime_usec_max = rtkit_get_rttime_usec_max(bus)) < 0)
+                fprintf(stderr, "Failed to retrieve rttime limit: %s\n", strerror(-rttime_usec_max));
         else
-                printf("Rttime limit is: %lld ns\n", rttime_nsec_max);
+                printf("Rttime limit is: %lld ns\n", rttime_usec_max);
 
         memset(&rlim, 0, sizeof(rlim));
         rlim.rlim_cur = rlim.rlim_max = 100000000ULL; /* 100ms */

@@ -92,7 +92,7 @@
         "                <method name=\"ResetKnown\"/>\n"               \
         "                <method name=\"ResetAll\"/>\n"                 \
         "                <method name=\"Exit\"/>\n"                     \
-        "                <property name=\"RTTimeNSecMax\" type=\"x\" access=\"read\"/>\n" \
+        "                <property name=\"RTTimeUSecMax\" type=\"x\" access=\"read\"/>\n" \
         "                <property name=\"MaxRealtimePriority\" type=\"i\" access=\"read\"/>\n" \
         "                <property name=\"MinNiceLevel\" type=\"i\" access=\"read\"/>\n" \
         "        </interface>\n"                                        \
@@ -139,7 +139,7 @@ static int min_nice_level = -15;
 static const char *username = "rtkit";
 
 /* Enforce that clients have RLIMIT_RTTIME set to a value <= this */
-static unsigned long long rttime_nsec_max = 200000000ULL; /* 200 ms */
+static unsigned long long rttime_usec_max = 200000ULL; /* 200 ms */
 
 /* How many users do we supervise at max? */
 static unsigned users_max = 2048;
@@ -662,7 +662,7 @@ static int verify_process_rttime(struct process *p) {
                 if (errno != 0 || !e || *e != 0)
                         break;
 
-                if (rttime <= rttime_nsec_max)
+                if (rttime <= rttime_usec_max)
                         good = true;
 
                 break;
@@ -1292,8 +1292,8 @@ static void add_variant(
 }
 
 static int handle_dbus_prop_get(const char* property, DBusMessage *r) {
-        if (strcmp(property, "RTTimeNSecMax") == 0)
-                add_variant(r, DBUS_TYPE_INT64, &rttime_nsec_max);
+        if (strcmp(property, "RTTimeUSecMax") == 0)
+                add_variant(r, DBUS_TYPE_INT64, &rttime_usec_max);
         else if (strcmp(property, "MaxRealtimePriority") == 0)
                 add_variant(r, DBUS_TYPE_INT32, &max_realtime_priority);
         else if (strcmp(property, "MinNiceLevel") == 0)
@@ -1863,7 +1863,7 @@ static int set_resource_limits(void) {
         int r;
 
         assert(table[7].id == RLIMIT_RTTIME);
-        table[7].value = rttime_nsec_max; /* Do as I say AND do as I do */
+        table[7].value = rttime_usec_max; /* Do as I say AND do as I do */
 
         if (!do_limit_resources)
                 return 0;
@@ -1903,7 +1903,7 @@ enum {
         ARG_MAX_REALTIME_PRIORITY,
         ARG_MIN_NICE_LEVEL,
         ARG_USER_NAME,
-        ARG_RTTIME_NSEC_MAX,
+        ARG_RTTIME_USEC_MAX,
         ARG_USERS_MAX,
         ARG_PROCESSES_PER_USER_MAX,
         ARG_THREADS_PER_USER_MAX,
@@ -1932,7 +1932,7 @@ static const struct option long_options[] = {
     { "max-realtime-priority",       required_argument, 0, ARG_MAX_REALTIME_PRIORITY },
     { "min-nice-level",              required_argument, 0, ARG_MIN_NICE_LEVEL },
     { "user-name",                   required_argument, 0, ARG_USER_NAME },
-    { "rttime-nsec-max",             required_argument, 0, ARG_RTTIME_NSEC_MAX },
+    { "rttime-usec-max",             required_argument, 0, ARG_RTTIME_USEC_MAX },
     { "users-max",                   required_argument, 0, ARG_USERS_MAX },
     { "processes-per-user-max",      required_argument, 0, ARG_PROCESSES_PER_USER_MAX },
     { "threads-per-user-max",        required_argument, 0, ARG_THREADS_PER_USER_MAX },
@@ -1982,7 +1982,7 @@ static void show_help(const char *exe) {
                "      --our-nice-level=[%i..%i]      Nice level for the daemon (%i)\n"
                "      --max-realtime-priority=[%i..%i] Max realtime priority for clients (%u)\n"
                "      --min-nice-level=[%i..%i]      Min nice level for clients (%i)\n\n"
-               "      --rttime-nsec-max=NSEC          Require clients to have set RLIMIT_RTTIME\n"
+               "      --rttime-usec-max=USEC          Require clients to have set RLIMIT_RTTIME\n"
                "                                      not greater than this (%llu)\n\n"
                "      --users-max=INT                 How many users this daemon will serve at\n"
                "                                      max at the same time (%u)\n"
@@ -2011,7 +2011,7 @@ static void show_help(const char *exe) {
                PRIO_MIN, PRIO_MAX-1, our_nice_level,
                sched_get_priority_min(sched_policy), sched_get_priority_max(sched_policy), max_realtime_priority,
                PRIO_MIN, PRIO_MAX-1, min_nice_level,
-               rttime_nsec_max,
+               rttime_usec_max,
                users_max,
                processes_per_user_max,
                threads_per_user_max,
@@ -2113,13 +2113,13 @@ static int parse_command_line(int argc, char *argv[], int *ret) {
                                 break;
                         }
 
-                        case ARG_RTTIME_NSEC_MAX: {
+                        case ARG_RTTIME_USEC_MAX: {
                                 char *e = NULL;
 
                                 errno = 0;
-                                rttime_nsec_max = strtoull(optarg, &e, 0);
-                                if (errno != 0 || !e || *e || rttime_nsec_max <= 0) {
-                                        fprintf(stderr, "--rttime-nsec-max parameter invalid.\n");
+                                rttime_usec_max = strtoull(optarg, &e, 0);
+                                if (errno != 0 || !e || *e || rttime_usec_max <= 0) {
+                                        fprintf(stderr, "--rttime-usec-max parameter invalid.\n");
                                         return -1;
                                 }
                                 break;

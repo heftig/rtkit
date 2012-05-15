@@ -155,11 +155,11 @@ int rtkit_get_min_nice_level(DBusConnection *connection, int* min_nice_level) {
         return err;
 }
 
-long long rtkit_get_rttime_nsec_max(DBusConnection *connection) {
+long long rtkit_get_rttime_usec_max(DBusConnection *connection) {
         long long retval;
         int err;
 
-        err = rtkit_get_int_property(connection, "RTTimeNSecMax", &retval);
+        err = rtkit_get_int_property(connection, "RTTimeUSecMax", &retval);
         return err < 0 ? err : retval;
 }
 
@@ -301,7 +301,7 @@ int rtkit_get_min_nice_level(DBusConnection *connection, int* min_nice_level) {
         return -ENOTSUP;
 }
 
-long long rtkit_get_rttime_nsec_max(DBusConnection *connection) {
+long long rtkit_get_rttime_usec_max(DBusConnection *connection) {
         return -ENOTSUP;
 }
 

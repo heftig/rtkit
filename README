@@ -163,7 +163,7 @@ DAEMON:
         system is overloaded already handing out further RT scheduling
         will be delayed a bit.
 
-        --rttime-nsec-max= may be used to control which RLIMIT_RTTIME
+        --rttime-usec-max= may be used to control which RLIMIT_RTTIME
         value clients need to have chosen at minumum before they may
         acquire RT scheduling through RealtimeKit.
 

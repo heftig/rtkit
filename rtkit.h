@@ -69,7 +69,7 @@ int rtkit_get_min_nice_level(DBusConnection *system_bus, int* min_nice_level);
 /* Return the maximum value of RLIMIT_RTTIME to set before attempting a
  * realtime request. A negative value is an errno style error code.
  */
-long long rtkit_get_rttime_nsec_max(DBusConnection *system_bus);
+long long rtkit_get_rttime_usec_max(DBusConnection *system_bus);
 
 
 #ifdef __cplusplus

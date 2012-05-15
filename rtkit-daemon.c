@@ -114,7 +114,7 @@
 #define assert_se(expr)                                                 \
         do {                                                            \
                 if (__builtin_expect(!(expr), 0)) {                     \
-                        fprintf(stderr, "Asssertion %s failed at %s:%u, function %s(). Aborting.\n", #expr, __FILE__, __LINE__, __PRETTY_FUNCTION__); \
+                        fprintf(stderr, "Assertion %s failed at %s:%u, function %s(). Aborting.\n", #expr, __FILE__, __LINE__, __PRETTY_FUNCTION__); \
                         abort();                                        \
                 }                                                       \
         } while(0)
@@ -1790,7 +1790,7 @@ static int drop_privileges(void) {
                                 }
 
                         if (!keep)
-                                assert_se(prctl(PR_CAPBSET_DROP, c) == 0 || errno == EINVAL);
+                                assert_se(prctl(PR_CAPBSET_DROP, c) == 0 || errno == EINVAL || errno == EPERM);
                 }
 
                 /* Fourth, say that we want to keep caps */

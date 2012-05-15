@@ -1,3 +1,4 @@
+/build-aux/
 /rtkit-daemon.service
 stamp*
 /*.tar.gz

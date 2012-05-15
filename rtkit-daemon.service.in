@@ -17,13 +17,15 @@
 
 [Unit]
 Description=RealtimeKit Scheduling Policy Service
-After=syslog.target
 
 [Service]
 ExecStart=@LIBEXECDIR@/rtkit-daemon
 Type=dbus
 BusName=org.freedesktop.RealtimeKit1
 NotifyAccess=main
+
+# Work around the fact that the Linux currently doesn't assign any RT
+# budget to CPU control groups that have none configured explicitly
 ControlGroup=cpu:/
 
 [Install]

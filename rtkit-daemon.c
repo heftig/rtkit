@@ -1170,12 +1170,14 @@ static int verify_polkit(DBusConnection *c, struct rtkit_user *u, struct process
         DBusMessage *m = NULL, *r = NULL;
         const char *unix_process = "unix-process";
         const char *pid = "pid";
+        const char *uid = "uid";
         const char *start_time = "start-time";
         const char *cancel_id = "";
         uint32_t flags = 0;
         uint32_t pid_u32 = p->pid;
-        uint64_t start_time_u64 = p->starttime;
+        uint32_t uid_u32 = (uint32_t)u->uid;
         DBusMessageIter iter_msg, iter_struct, iter_array, iter_dict, iter_variant;
+        uint64_t start_time_u64 = p->starttime;
         int ret;
         dbus_bool_t authorized = FALSE;
 
@@ -1203,6 +1205,13 @@ static int verify_polkit(DBusConnection *c, struct rtkit_user *u, struct process
         assert_se(dbus_message_iter_append_basic(&iter_dict, DBUS_TYPE_STRING, &start_time));
         assert_se(dbus_message_iter_open_container(&iter_dict, DBUS_TYPE_VARIANT, "t", &iter_variant));
         assert_se(dbus_message_iter_append_basic(&iter_variant, DBUS_TYPE_UINT64, &start_time_u64));
+        assert_se(dbus_message_iter_close_container(&iter_dict, &iter_variant));
+        assert_se(dbus_message_iter_close_container(&iter_array, &iter_dict));
+
+        assert_se(dbus_message_iter_open_container(&iter_array, DBUS_TYPE_DICT_ENTRY, NULL, &iter_dict));
+        assert_se(dbus_message_iter_append_basic(&iter_dict, DBUS_TYPE_STRING, &uid));
+        assert_se(dbus_message_iter_open_container(&iter_dict, DBUS_TYPE_VARIANT, "u", &iter_variant));
+        assert_se(dbus_message_iter_append_basic(&iter_variant, DBUS_TYPE_UINT32, &uid_u32));
         assert_se(dbus_message_iter_close_container(&iter_dict, &iter_variant));
         assert_se(dbus_message_iter_close_container(&iter_array, &iter_dict));
 

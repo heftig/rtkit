@@ -115,6 +115,7 @@ AC_SEARCH_LIBS([mq_open], [rt])
 AC_SEARCH_LIBS([cap_init], [cap])
 
 PKG_CHECK_MODULES(DBUS, dbus-1)
+PKG_CHECK_MODULES(LIBSYSTEMD, libsystemd)
 
 AC_ARG_WITH([systemdsystemunitdir],
         AS_HELP_STRING([--with-systemdsystemunitdir=DIR], [Directory for systemd service files]),

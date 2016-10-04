@@ -50,9 +50,9 @@
 #include <dirent.h>
 #include <syslog.h>
 #include <grp.h>
+#include <systemd/sd-daemon.h>
 
 #include "rtkit.h"
-#include "sd-daemon.h"
 
 #ifndef __linux__
 #error "This stuff only works on Linux!"

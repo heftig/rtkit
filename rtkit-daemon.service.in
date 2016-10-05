@@ -27,9 +27,5 @@ CapabilityBoundingSet=CAP_SYS_NICE CAP_DAC_READ_SEARCH CAP_SYS_PTRACE CAP_SYS_CH
 PrivateTmp=yes
 PrivateNetwork=yes
 
-# Work around the fact that the Linux currently doesn't assign any RT
-# budget to CPU control groups that have none configured explicitly
-ControlGroup=cpu:/
-
 [Install]
 WantedBy=graphical.target

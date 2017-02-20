@@ -1333,7 +1333,7 @@ static DBusHandlerResult dbus_handler(DBusConnection *c, DBusMessage *m, void *u
                 int ret;
 
                 if ((ret = verify_canary_refusal()) < 0) {
-                        assert_se(r = dbus_message_new_error_printf(m, translate_error_forward(ret), strerror(-ret)));
+                        assert_se(r = dbus_message_new_error_printf(m, translate_error_forward(ret), "%s", strerror(-ret)));
                         goto finish;
                 }
 
@@ -1358,17 +1358,17 @@ static DBusHandlerResult dbus_handler(DBusConnection *c, DBusMessage *m, void *u
 
                 if ((ret = lookup_client(&u, &p, &t, c, m, (pid_t)process, (pid_t) thread)) < 0) {
                         syslog(LOG_DEBUG, "Failed to look up client: %s\n", strerror(-ret));
-                        assert_se(r = dbus_message_new_error_printf(m, translate_error_forward(ret), strerror(-ret)));
+                        assert_se(r = dbus_message_new_error_printf(m, translate_error_forward(ret), "%s", strerror(-ret)));
                         goto finish;
                 }
 
                 if ((ret = verify_polkit(c, u, p, "org.freedesktop.RealtimeKit1.acquire-real-time")) < 0) {
-                        assert_se(r = dbus_message_new_error_printf(m, translate_error_forward(ret), strerror(-ret)));
+                        assert_se(r = dbus_message_new_error_printf(m, translate_error_forward(ret), "%s", strerror(-ret)));
                         goto finish;
                 }
 
                 if ((ret = process_set_realtime(u, p, t, priority))) {
-                        assert_se(r = dbus_message_new_error_printf(m, translate_error_forward(ret), strerror(-ret)));
+                        assert_se(r = dbus_message_new_error_printf(m, translate_error_forward(ret), "%s", strerror(-ret)));
                         goto finish;
                 }
 
@@ -1385,7 +1385,7 @@ static DBusHandlerResult dbus_handler(DBusConnection *c, DBusMessage *m, void *u
                 int ret;
 
                 if ((ret = verify_canary_refusal()) < 0) {
-                        assert_se(r = dbus_message_new_error_printf(m, translate_error_forward(ret), strerror(-ret)));
+                        assert_se(r = dbus_message_new_error_printf(m, translate_error_forward(ret), "%s", strerror(-ret)));
                         goto finish;
                 }
 
@@ -1410,17 +1410,17 @@ static DBusHandlerResult dbus_handler(DBusConnection *c, DBusMessage *m, void *u
 
                 if ((ret = lookup_client(&u, &p, &t, c, m, (pid_t)process, (pid_t) thread)) < 0) {
                         syslog(LOG_DEBUG, "Failed to look up client: %s\n", strerror(-ret));
-                        assert_se(r = dbus_message_new_error_printf(m, translate_error_forward(ret), strerror(-ret)));
+                        assert_se(r = dbus_message_new_error_printf(m, translate_error_forward(ret), "%s", strerror(-ret)));
                         goto finish;
                 }
 
                 if ((ret = verify_polkit(c, u, p, "org.freedesktop.RealtimeKit1.acquire-high-priority")) < 0) {
-                        assert_se(r = dbus_message_new_error_printf(m, translate_error_forward(ret), strerror(-ret)));
+                        assert_se(r = dbus_message_new_error_printf(m, translate_error_forward(ret), "%s", strerror(-ret)));
                         goto finish;
                 }
 
                 if ((ret = process_set_high_priority(u, p, t, priority))) {
-                        assert_se(r = dbus_message_new_error_printf(m, translate_error_forward(ret), strerror(-ret)));
+                        assert_se(r = dbus_message_new_error_printf(m, translate_error_forward(ret), "%s", strerror(-ret)));
                         goto finish;
                 }
 

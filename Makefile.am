@@ -21,7 +21,7 @@ AM_LDFLAGS = $(GCLDFLAGS)
 ACLOCAL_AMFLAGS = -I m4
 
 policykitdir = $(datadir)/polkit-1/actions/
-dbussystemdir = $(sysconfdir)/dbus-1/system.d/
+dbussystemdir = $(datadir)/dbus-1/system.d/
 dbusservicedir = $(datadir)/dbus-1/system-services/
 
 EXTRA_DIST = \

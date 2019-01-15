@@ -23,6 +23,7 @@ ACLOCAL_AMFLAGS = -I m4
 policykitdir = $(datadir)/polkit-1/actions/
 dbussystemdir = $(datadir)/dbus-1/system.d/
 dbusservicedir = $(datadir)/dbus-1/system-services/
+dbusinterfacedir = $(datadir)/dbus-1/interfaces/
 
 EXTRA_DIST = \
 	README \
@@ -49,6 +50,8 @@ dbussystem_DATA = \
 	org.freedesktop.RealtimeKit1.conf
 dbusservice_DATA = \
 	org.freedesktop.RealtimeKit1.service
+dbusinterface_DATA = \
+	org.freedesktop.RealtimeKit1.xml
 
 if HAVE_SYSTEMD
 systemdsystemunit_DATA = \
@@ -86,6 +89,9 @@ org.freedesktop.RealtimeKit1.service: org.freedesktop.RealtimeKit1.service.in
 
 rtkit-daemon.service: rtkit-daemon.service.in
 	$(AM_V_GEN)sed -e 's,@LIBEXECDIR\@,$(libexecdir),g' < $< > $@
+
+org.freedesktop.RealtimeKit1.xml: rtkit-daemon
+	$(AM_V_GEN)./$< --introspect > $@
 
 man8_MANS = rtkitctl.8
 

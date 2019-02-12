@@ -24,6 +24,7 @@ policykitdir = $(datadir)/polkit-1/actions/
 dbussystemdir = $(datadir)/dbus-1/system.d/
 dbusservicedir = $(datadir)/dbus-1/system-services/
 dbusinterfacedir = $(datadir)/dbus-1/interfaces/
+installedtestsdir = $(libexecdir)/installed-tests/rtkit/
 
 EXTRA_DIST = \
 	README \
@@ -42,7 +43,7 @@ libexec_PROGRAMS = \
 	rtkit-daemon
 sbin_PROGRAMS = \
 	rtkitctl
-noinst_PROGRAMS = \
+installedtests_PROGRAMS = \
 	rtkit-test
 policykit_DATA = \
 	org.freedesktop.RealtimeKit1.policy

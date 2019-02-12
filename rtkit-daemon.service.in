@@ -23,7 +23,7 @@ ExecStart=@LIBEXECDIR@/rtkit-daemon
 Type=dbus
 BusName=org.freedesktop.RealtimeKit1
 NotifyAccess=main
-CapabilityBoundingSet=CAP_SYS_NICE CAP_DAC_READ_SEARCH CAP_SYS_PTRACE CAP_SYS_CHROOT CAP_SETGID CAP_SETUID
+CapabilityBoundingSet=CAP_SYS_NICE CAP_DAC_READ_SEARCH CAP_SYS_CHROOT CAP_SETGID CAP_SETUID
 PrivateNetwork=yes
 
 [Install]

@@ -1775,8 +1775,7 @@ static int drop_privileges(void) {
         if (do_drop_privileges) {
                 static const cap_value_t cap_values[] = {
                         CAP_SYS_NICE,             /* Needed for obvious reasons */
-                        CAP_DAC_READ_SEARCH,      /* Needed so that we can verify resource limits */
-                        CAP_SYS_PTRACE            /* Needed so that we can read /proc/$$/exe. Linux is weird. */
+                        CAP_DAC_READ_SEARCH      /* Needed so that we can verify resource limits */
                 };
 
                 cap_value_t c, m;

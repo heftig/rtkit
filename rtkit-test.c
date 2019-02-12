@@ -103,7 +103,7 @@ int main(int argc, char *argv[]) {
                 printf("Rttime limit is: %lld ns\n", rttime_usec_max);
 
         memset(&rlim, 0, sizeof(rlim));
-        rlim.rlim_cur = rlim.rlim_max = 100000000ULL; /* 100ms */
+        rlim.rlim_cur = rlim.rlim_max = 100000ULL; /* 100ms */
         if ((setrlimit(RLIMIT_RTTIME, &rlim) < 0))
                 fprintf(stderr, "Failed to set RLIMIT_RTTIME: %s\n", strerror(errno));
 

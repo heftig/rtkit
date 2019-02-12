@@ -1441,16 +1441,20 @@ static DBusHandlerResult dbus_handler(DBusConnection *c, DBusMessage *m, void *u
                 if (strcmp(interface, "org.freedesktop.RealtimeKit1") == 0) {
                         assert_se(r = dbus_message_new_method_return(m));
 
-                        if (!handle_dbus_prop_get(property, r) < 0) {
+                        if (handle_dbus_prop_get(property, r) < 0) {
                                 dbus_message_unref(r);
                                 assert_se(r = dbus_message_new_error_printf(
                                           m,
-                                          DBUS_ERROR_UNKNOWN_METHOD,
+                                          DBUS_ERROR_UNKNOWN_PROPERTY,
                                           "Unknown property %s",
                                           property));
                         }
                 } else
-                        return DBUS_HANDLER_RESULT_NOT_YET_HANDLED;
+                        assert_se(r = dbus_message_new_error_printf(
+                                m,
+                                DBUS_ERROR_UNKNOWN_PROPERTY,
+                                "Unknown interface %s",
+                                interface));
 
         } else if (dbus_message_is_method_call(m, "org.freedesktop.DBus.Introspectable", "Introspect")) {
                 const char *xml = INTROSPECT_XML;

@@ -67,48 +67,8 @@
 #define RLIMIT_RTTIME 15
 #endif
 
-#define INTROSPECT_XML                                                  \
-        DBUS_INTROSPECT_1_0_XML_DOCTYPE_DECL_NODE                       \
-        "<node>\n"                                                      \
-        "        <interface name=\"org.freedesktop.RealtimeKit1\">\n"   \
-        "                <method name=\"MakeThreadRealtime\">\n"        \
-        "                        <arg name=\"thread\" type=\"t\" direction=\"in\"/>\n" \
-        "                        <arg name=\"priority\" type=\"u\" direction=\"in\"/>\n" \
-        "                </method>\n"                                   \
-        "                <method name=\"MakeThreadRealtimeWithPID\">\n"        \
-        "                        <arg name=\"process\" type=\"t\" direction=\"in\"/>\n" \
-        "                        <arg name=\"thread\" type=\"t\" direction=\"in\"/>\n" \
-        "                        <arg name=\"priority\" type=\"u\" direction=\"in\"/>\n" \
-        "                </method>\n"                                   \
-        "                <method name=\"MakeThreadHighPriority\">\n"          \
-        "                        <arg name=\"thread\" type=\"t\" direction=\"in\"/>\n" \
-        "                        <arg name=\"priority\" type=\"i\" direction=\"in\"/>\n" \
-        "                </method>\n"                                   \
-        "                <method name=\"MakeThreadHighPriorityWithPID\">\n"          \
-        "                        <arg name=\"process\" type=\"t\" direction=\"in\"/>\n" \
-        "                        <arg name=\"thread\" type=\"t\" direction=\"in\"/>\n" \
-        "                        <arg name=\"priority\" type=\"i\" direction=\"in\"/>\n" \
-        "                </method>\n"                                   \
-        "                <method name=\"ResetKnown\"/>\n"               \
-        "                <method name=\"ResetAll\"/>\n"                 \
-        "                <method name=\"Exit\"/>\n"                     \
-        "                <property name=\"RTTimeUSecMax\" type=\"x\" access=\"read\"/>\n" \
-        "                <property name=\"MaxRealtimePriority\" type=\"i\" access=\"read\"/>\n" \
-        "                <property name=\"MinNiceLevel\" type=\"i\" access=\"read\"/>\n" \
-        "        </interface>\n"                                        \
-        "        <interface name=\"org.freedesktop.DBus.Properties\">\n"\
-        "                <method name=\"Get\">"                         \
-        "                       <arg name=\"interface\" direction=\"in\" type=\"s\"/>\n" \
-        "                       <arg name=\"property\" direction=\"in\" type=\"s\"/>\n" \
-        "                       <arg name=\"value\" direction=\"out\" type=\"v\"/>\n" \
-        "                </method>\n"                                   \
-        "        </interface>\n"                                        \
-        "        <interface name=\"org.freedesktop.DBus.Introspectable\">\n" \
-        "                <method name=\"Introspect\">\n"                \
-        "                        <arg name=\"data\" type=\"s\" direction=\"out\"/>\n" \
-        "                </method>\n"                                   \
-        "        </interface>\n"                                        \
-        "</node>\n"
+/* The introspection XML from org.freedesktop.RealtimeKit1.xml (via xml-introspection.S) */
+extern const char introspect_xml[];
 
 /* Similar to assert(), but has side effects, and hence shall never be optimized away, regardless of NDEBUG */
 #define assert_se(expr)                                                 \
@@ -1457,12 +1417,10 @@ static DBusHandlerResult dbus_handler(DBusConnection *c, DBusMessage *m, void *u
                                 interface));
 
         } else if (dbus_message_is_method_call(m, "org.freedesktop.DBus.Introspectable", "Introspect")) {
-                const char *xml = INTROSPECT_XML;
-
                 assert_se(r = dbus_message_new_method_return(m));
                 assert_se(dbus_message_append_args(
                                           r,
-                                          DBUS_TYPE_STRING, &xml,
+                                          DBUS_TYPE_STRING, &introspect_xml,
                                           DBUS_TYPE_INVALID));
         } else
                 return DBUS_HANDLER_RESULT_NOT_YET_HANDLED;
@@ -2256,7 +2214,7 @@ static int parse_command_line(int argc, char *argv[], int *ret) {
                                 break;
 
                         case ARG_INTROSPECT:
-                                fputs(INTROSPECT_XML, stdout);
+                                fputs(introspect_xml, stdout);
                                 *ret = 0;
                                 return 0;
 

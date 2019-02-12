@@ -33,6 +33,7 @@ EXTRA_DIST = \
 	org.freedesktop.RealtimeKit1.policy \
 	org.freedesktop.RealtimeKit1.conf \
 	org.freedesktop.RealtimeKit1.service.in \
+	org.freedesktop.RealtimeKit1.xml \
 	rtkit-daemon.service.in
 
 CLEANFILES = \
@@ -60,7 +61,9 @@ systemdsystemunit_DATA = \
 endif
 
 rtkit_daemon_SOURCES = \
-	rtkit-daemon.c rtkit.h
+	rtkit-daemon.c \
+	rtkit.h \
+	xml-introspection.S
 rtkit_daemon_LDADD = \
 	$(DBUS_LIBS) \
 	$(LIBSYSTEMD_LIBS)
@@ -91,8 +94,7 @@ org.freedesktop.RealtimeKit1.service: org.freedesktop.RealtimeKit1.service.in
 rtkit-daemon.service: rtkit-daemon.service.in
 	$(AM_V_GEN)sed -e 's,@LIBEXECDIR\@,$(libexecdir),g' < $< > $@
 
-org.freedesktop.RealtimeKit1.xml: rtkit-daemon
-	$(AM_V_GEN)./$< --introspect > $@
+xml-introspection.o: org.freedesktop.RealtimeKit1.xml
 
 man8_MANS = rtkitctl.8
 

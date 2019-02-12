@@ -746,26 +746,10 @@ static int thread_reset(pid_t tid) {
         return r;
 }
 
-static char* get_exe_name(pid_t pid, char *exe, size_t len) {
-        char fn[128];
-        ssize_t n;
-
-        assert_se(snprintf(fn, sizeof(fn)-1, "%s/%llu/exe", get_proc_path(), (unsigned long long) pid) < (int) (sizeof(fn)-1));
-        fn[sizeof(fn)-1] = 0;
-
-        if ((n = readlink(fn, exe, len-1)) < 0) {
-                snprintf(exe, len-1, "n/a");
-                exe[len-1] = 0;
-        } else
-                exe[n] = 0;
-
-        return exe;
-}
-
 static int process_set_realtime(struct rtkit_user *u, struct process *p, struct thread *t, unsigned priority) {
         int r;
         struct sched_param param;
-        char user[64], exe[128];
+        char user[64];
 
         if ((int) priority < sched_get_priority_min(sched_policy) ||
             (int) priority > sched_get_priority_max(sched_policy))
@@ -817,10 +801,9 @@ static int process_set_realtime(struct rtkit_user *u, struct process *p, struct 
                 goto finish;
         }
 
-        syslog(LOG_INFO, "Successfully made thread %llu of process %llu (%s) owned by '%s' RT at priority %u.\n",
+        syslog(LOG_INFO, "Successfully made thread %llu of process %llu owned by '%s' RT at priority %u.\n",
                (unsigned long long) t->pid,
                (unsigned long long) p->pid,
-               get_exe_name(p->pid, exe, sizeof(exe)),
                get_user_name(u->uid, user, sizeof(user)),
                priority);
 
@@ -835,7 +818,7 @@ finish:
 static int process_set_high_priority(struct rtkit_user *u, struct process *p, struct thread *t, int priority) {
         int r;
         struct sched_param param;
-        char user[64], exe[128];
+        char user[64];
 
         if (priority < PRIO_MIN || priority >= PRIO_MAX)
                 return -EINVAL;
@@ -881,10 +864,9 @@ static int process_set_high_priority(struct rtkit_user *u, struct process *p, st
                 goto finish;
         }
 
-        syslog(LOG_INFO, "Successfully made thread %llu of process %llu (%s) owned by '%s' high priority at nice level %i.\n",
+        syslog(LOG_INFO, "Successfully made thread %llu of process %llu owned by '%s' high priority at nice level %i.\n",
                (unsigned long long) t->pid,
                (unsigned long long) p->pid,
-               get_exe_name(p->pid, exe, sizeof(exe)),
                get_user_name(u->uid, user, sizeof(user)),
                priority);
 
@@ -911,11 +893,9 @@ static void reset_known(void) {
                                     verify_process_starttime(p) >= 0 &&
                                     verify_thread_starttime(p, t) >= 0)
                                         if (thread_reset(t->pid) >= 0) {
-                                                char exe[64];
-                                                syslog(LOG_NOTICE, "Successfully demoted thread %llu of process %llu (%s).\n",
+                                                syslog(LOG_NOTICE, "Successfully demoted thread %llu of process %llu.\n",
                                                        (unsigned long long) t->pid,
-                                                       (unsigned long long) p->pid,
-                                                       get_exe_name(p->pid, exe, sizeof(exe)));
+                                                       (unsigned long long) p->pid);
                                                 n_demoted++;
                                         }
 
@@ -1007,11 +987,9 @@ static int reset_all(void) {
                         if (r == SCHED_FIFO || r == SCHED_RR ||
                             r == (SCHED_FIFO|SCHED_RESET_ON_FORK) || r == (SCHED_RR|SCHED_RESET_ON_FORK))
                                 if (thread_reset((pid_t) tid) >= 0) {
-                                        char exe[64];
-                                        syslog(LOG_NOTICE, "Successfully demoted thread %llu of process %llu (%s).\n",
+                                        syslog(LOG_NOTICE, "Successfully demoted thread %llu of process %llu.\n",
                                                (unsigned long long) tid,
-                                               (unsigned long long) pid,
-                                               get_exe_name(pid, exe, sizeof(exe)));
+                                               (unsigned long long) pid);
                                         n_demoted++;
                                 }
                 }

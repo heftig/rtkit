@@ -1417,10 +1417,12 @@ static DBusHandlerResult dbus_handler(DBusConnection *c, DBusMessage *m, void *u
                                 interface));
 
         } else if (dbus_message_is_method_call(m, "org.freedesktop.DBus.Introspectable", "Introspect")) {
+                const char *xml = introspect_xml;
+
                 assert_se(r = dbus_message_new_method_return(m));
                 assert_se(dbus_message_append_args(
                                           r,
-                                          DBUS_TYPE_STRING, &introspect_xml,
+                                          DBUS_TYPE_STRING, &xml,
                                           DBUS_TYPE_INVALID));
         } else
                 return DBUS_HANDLER_RESULT_NOT_YET_HANDLED;

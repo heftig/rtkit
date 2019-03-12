@@ -1,10 +1,7 @@
 REALTIMEKIT Realtime Policy and Watchdog Daemon
 
 GIT:
-        git://git.0pointer.de/rtkit.git
-
-GITWEB:
-        http://git.0pointer.de/?p=rtkit.git
+        https://github.com/heftig/rtkit
 
 NOTES:
         RealtimeKit is a D-Bus system service that changes the
@@ -218,3 +215,4 @@ REQUIREMENTS:
         Linux kernel >= 2.6.31
         D-Bus
         PolicyKit >= 0.92
+        libsystemd

@@ -97,7 +97,7 @@ rtkit-daemon.service: rtkit-daemon.service.in
 xml-introspection.c: org.freedesktop.RealtimeKit1.xml
 	@echo 'const char introspect_xml[] = {' > $@
 	$(AM_V_GEN)$(XXD) -i < $< >> $@
-	@echo '};' >> $@
+	@echo ',0x00};' >> $@
 
 man8_MANS = rtkitctl.8
 

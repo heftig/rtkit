@@ -125,6 +125,8 @@ AC_ARG_WITH([systemdsystemunitdir],
 AC_SUBST([systemdsystemunitdir], [$with_systemdsystemunitdir])
 AM_CONDITIONAL(HAVE_SYSTEMD, [test -n "$with_systemdsystemunitdir"])
 
+AC_PROG_SED
+
 ###################################
 #            Output               #
 ###################################

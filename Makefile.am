@@ -89,10 +89,10 @@ rtkit_test_CFLAGS = \
 	$(DBUS_CFLAGS)
 
 org.freedesktop.RealtimeKit1.service: org.freedesktop.RealtimeKit1.service.in
-	$(AM_V_GEN)sed -e 's,@LIBEXECDIR\@,$(libexecdir),g' < $< > $@
+	$(AM_V_GEN)$(SED) -e 's,@LIBEXECDIR\@,$(libexecdir),g' < $< > $@
 
 rtkit-daemon.service: rtkit-daemon.service.in
-	$(AM_V_GEN)sed -e 's,@LIBEXECDIR\@,$(libexecdir),g' < $< > $@
+	$(AM_V_GEN)$(SED) -e 's,@LIBEXECDIR\@,$(libexecdir),g' < $< > $@
 
 xml-introspection.o: org.freedesktop.RealtimeKit1.xml
 

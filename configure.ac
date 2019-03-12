@@ -51,7 +51,6 @@ AM_PROG_CC_C_O
 AC_PROG_GCC_TRADITIONAL
 AC_USE_SYSTEM_EXTENSIONS
 AC_SYS_LARGEFILE
-AM_PROG_AS
 
 # GCC flags
 
@@ -126,6 +125,10 @@ AC_SUBST([systemdsystemunitdir], [$with_systemdsystemunitdir])
 AM_CONDITIONAL(HAVE_SYSTEMD, [test -n "$with_systemdsystemunitdir"])
 
 AC_PROG_SED
+AC_PATH_PROG([XXD], [xxd], [xxd])
+if test "$XXD" = xxd; then
+        AC_MSG_WARN([xxd not found, cannot compile introspection XML])
+fi
 
 ###################################
 #            Output               #

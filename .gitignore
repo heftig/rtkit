@@ -8,7 +8,9 @@
 /Makefile.in
 /aclocal.m4
 /build-aux/
+/build/
 /compile
+/compile_commands.json
 /config.guess
 /config.h
 /config.h.in

@@ -1,0 +1,6 @@
+#ifndef fooconfighfoo
+#define fooconfighfoo
+
+#mesondefine PACKAGE_VERSION
+
+#endif

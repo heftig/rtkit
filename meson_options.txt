@@ -1,0 +1,36 @@
+option(
+        'dbus_interfacedir',
+        type: 'string',
+        value: '',
+        description: 'Directory for D-Bus interface definitions',
+)
+option(
+        'dbus_rulesdir',
+        type: 'string',
+        value: '',
+        description: 'Directory for D-Bus system bus policy rules',
+)
+option(
+        'dbus_systemservicedir',
+        type: 'string',
+        value: '',
+        description: 'Directory for D-Bus system services',
+)
+option(
+        'polkit_actiondir',
+        type: 'string',
+        value: '',
+        description: 'Directory for Polkit actions',
+)
+option(
+        'systemd_systemunitdir',
+        type: 'string',
+        value: '',
+        description: 'Directory for systemd system units',
+)
+option(
+        'installed_tests',
+        type: 'boolean',
+        value: true,
+        description: 'Install tests'
+)

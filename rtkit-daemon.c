@@ -67,8 +67,10 @@
 #define RLIMIT_RTTIME 15
 #endif
 
-/* The introspection XML from org.freedesktop.RealtimeKit1.xml (via xml-introspection.S) */
-extern const char introspect_xml[];
+/* The introspection XML from org.freedesktop.RealtimeKit1.xml */
+static const char introspect_xml[] = {
+#include "xml-introspection.h"
+,0x00};
 
 /* Similar to assert(), but has side effects, and hence shall never be optimized away, regardless of NDEBUG */
 #define assert_se(expr)                                                 \

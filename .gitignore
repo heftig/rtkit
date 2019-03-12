@@ -25,5 +25,5 @@
 /rtkit-daemon.service
 /rtkit-test
 /rtkitctl
-/xml-introspection.c
+/xml-introspection.h
 stamp*

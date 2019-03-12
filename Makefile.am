@@ -63,7 +63,7 @@ endif
 rtkit_daemon_SOURCES = \
 	rtkit-daemon.c \
 	rtkit.h \
-	xml-introspection.c
+	xml-introspection.h
 rtkit_daemon_LDADD = \
 	$(DBUS_LIBS) \
 	$(LIBSYSTEMD_LIBS)
@@ -94,10 +94,8 @@ org.freedesktop.RealtimeKit1.service: org.freedesktop.RealtimeKit1.service.in
 rtkit-daemon.service: rtkit-daemon.service.in
 	$(AM_V_GEN)$(SED) -e 's,@LIBEXECDIR\@,$(libexecdir),g' < $< > $@
 
-xml-introspection.c: org.freedesktop.RealtimeKit1.xml
-	@echo 'const char introspect_xml[] = {' > $@
-	$(AM_V_GEN)$(XXD) -i < $< >> $@
-	@echo ',0x00};' >> $@
+xml-introspection.h: org.freedesktop.RealtimeKit1.xml
+	$(AM_V_GEN)$(XXD) -i < $< > $@
 
 man8_MANS = rtkitctl.8
 

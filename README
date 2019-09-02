@@ -76,12 +76,21 @@ CLIENTS:
                 void MakeThreadHighPriority(u64 thread_id, s32 priority);
 
         The thread IDs need to be passed as kernel tids as returned by
-        gettid(), not a pthread_t! Only threads belonging to the
-        calling process can be made realtime/high priority. (Please
+        gettid(), not a pthread_t!  (Please
         note that gettid() is not available in glibc, you need to
         implement that manually using syscall(). Consult the reference
         client implementation for details.)
+        
+        It is possible to promote thread in process to realtime/high
+        priority from another process, that will make the DBUS call,
+        using:
+        
+                void MakeThreadRealtimeWithPID(u64 process, u64 thread_id, u32 priority);
 
+                void MakeThreadHighPriorityWithPID(u64 process, u64 thread_id, s32 priority);
+
+        where process is the PID of the process that has thread thread_id.
+        
         A BSD-licensed reference implementation of the client is
         available in rtkit.[ch] as part of the package. You may copy
         this into your sources if you wish. However given how simple

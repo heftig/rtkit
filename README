@@ -46,7 +46,7 @@ NOTES:
         resource limits and chroot() to minimize its security impact.
 
         RealtimeKit probably has little use in embedded or server use
-        cases, use RLIMIT_RTPRIO tehre instead.
+        cases, use RLIMIT_RTPRIO there instead.
 
 WHY:
         If processes that have real-time scheduling privileges enter a
@@ -170,7 +170,7 @@ DAEMON:
         will be delayed a bit.
 
         --rttime-usec-max= may be used to control which RLIMIT_RTTIME
-        value clients need to have chosen at minumum before they may
+        value clients need to have chosen at minimum before they may
         acquire RT scheduling through RealtimeKit.
 
         --users-max= specifies how many users may acquire RT

@@ -97,6 +97,9 @@ rtkit-daemon.service: rtkit-daemon.service.in
 xml-introspection.h: org.freedesktop.RealtimeKit1.xml
 	$(AM_V_GEN)$(XXD) -i < $< > $@
 
+BUILT_SOURCES = \
+	xml-introspection.h
+
 man8_MANS = rtkitctl.8
 
 EXTRA_DIST += \

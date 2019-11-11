@@ -27,4 +27,4 @@ CapabilityBoundingSet=CAP_SYS_NICE CAP_DAC_READ_SEARCH CAP_SYS_CHROOT CAP_SETGID
 PrivateNetwork=yes
 
 [Install]
-WantedBy=graphical.target
+WantedBy=multi-user.target

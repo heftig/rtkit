@@ -17,6 +17,12 @@ option(
         description: 'Directory for D-Bus system services',
 )
 option(
+        'libsystemd',
+        type: 'feature',
+        value: 'auto',
+        description: 'Use the libsystemd sd-daemon API to communicate with systemd'
+)
+option(
         'polkit_actiondir',
         type: 'string',
         value: '',

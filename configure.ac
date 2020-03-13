@@ -115,7 +115,18 @@ AC_SEARCH_LIBS([mq_open], [rt])
 AC_SEARCH_LIBS([cap_init], [cap])
 
 PKG_CHECK_MODULES(DBUS, dbus-1)
-PKG_CHECK_MODULES(LIBSYSTEMD, libsystemd)
+
+AC_ARG_ENABLE([libsystemd],
+	AS_HELP_STRING([--enable-libsystemd], [use the libsystemd sd-daemon API to communicate with systemd (default: automatic)]))
+AS_IF([test "x${enable_libsystemd}" != "xno"],
+	[PKG_CHECK_MODULES(LIBSYSTEMD, libsystemd, [have_libsystemd=yes], [have_libsystemd=no])],
+	[have_libsystemd=no])
+AS_IF([test "x${have_libsystemd}" = "xyes"],
+	[AC_DEFINE([HAVE_LIBSYSTEMD], [1], [Define to 1 if you have libsystemd and its header files])],
+	[AS_IF([test "x${enable_libsystemd}" = "xyes"],
+		[AC_MSG_ERROR([sd-daemon support requested but libsystemd not found])
+	])
+])
 
 AC_ARG_WITH([systemdsystemunitdir],
         AS_HELP_STRING([--with-systemdsystemunitdir=DIR], [Directory for systemd service files]),
@@ -148,4 +159,5 @@ echo "
     Compiler:               ${CC}
     CFLAGS:                 ${CFLAGS}
     systemd unit directory: ${systemdsystemunitdir}
+    use sd-daemon API:      ${have_libsystemd}
 "

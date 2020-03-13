@@ -17,7 +17,7 @@ xxd = find_program('xxd')
 
 dbus_dep = dependency('dbus-1')
 libcap_dep = dependency('libcap')
-libsystemd_dep = dependency('libsystemd')
+libsystemd_dep = dependency('libsystemd', required: get_option('libsystemd'))
 polkit_dep = dependency('polkit-gobject-1', required: false)
 systemd_dep = dependency('systemd', required: false)
 thread_dep = dependency('threads')
@@ -72,6 +72,7 @@ endif
 config = configuration_data()
 config.set('LIBEXECDIR', get_option('prefix') / libexecdir)
 config.set_quoted('PACKAGE_VERSION', meson.project_version())
+config.set('HAVE_LIBSYSTEMD', libsystemd_dep.found())
 
 config_h = configure_file(
         input: 'config.h.meson',

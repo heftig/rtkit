@@ -50,7 +50,10 @@
 #include <dirent.h>
 #include <syslog.h>
 #include <grp.h>
+
+#ifdef HAVE_LIBSYSTEMD
 #include <systemd/sd-daemon.h>
+#endif
 
 #include "rtkit.h"
 
@@ -1434,11 +1437,13 @@ static DBusHandlerResult dbus_handler(DBusConnection *c, DBusMessage *m, void *u
                 n_total_processes,
                 n_users);
 
+#ifdef HAVE_LIBSYSTEMD
         sd_notifyf(0,
                    "STATUS=Supervising %u threads of %u processes of %u users.",
                    n_total_threads,
                    n_total_processes,
                    n_users);
+#endif
 
 finish:
         if (r) {
@@ -2306,7 +2311,9 @@ int main(int argc, char *argv[]) {
 
         syslog(LOG_DEBUG, "Running.\n");
 
+#ifdef HAVE_LIBSYSTEMD
         sd_notify(0, "STATUS=Running.");
+#endif
 
         dbus_connection_set_exit_on_disconnect(bus, FALSE);
 

@@ -224,4 +224,6 @@ REQUIREMENTS:
         Linux kernel >= 2.6.31
         D-Bus
         PolicyKit >= 0.92
-        libsystemd
+
+OPTIONAL DEPENDENCIES:
+        libsystemd - to let rtkit talk to systemd using the sd-daemon API

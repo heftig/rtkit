@@ -3,4 +3,6 @@
 
 #mesondefine PACKAGE_VERSION
 
+#mesondefine HAVE_LIBSYSTEMD
+
 #endif

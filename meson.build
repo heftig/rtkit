@@ -115,6 +115,7 @@ executable(
         'rtkitctl',
         'rtkitctl.c', 'rtkit.h', config_h,
         install: true,
+        install_dir: get_option('sbindir'),
         dependencies: [dbus_dep],
 )
 

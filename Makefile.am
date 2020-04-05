@@ -30,6 +30,9 @@ EXTRA_DIST = \
 	README \
 	GPL \
 	LICENSE \
+	config.h.meson \
+	meson.build \
+	meson_options.txt \
 	org.freedesktop.RealtimeKit1.policy \
 	org.freedesktop.RealtimeKit1.conf \
 	org.freedesktop.RealtimeKit1.service.in \

@@ -21,7 +21,7 @@
 AC_PREREQ(2.68)
 
 AC_INIT([rtkit],
-        [0.12],
+        [0.13],
         [mzegxvg (at) 0pointer (dot) net],
         [rtkit],
         [http://git.0pointer.de/?p=rtkit.git])

@@ -13,7 +13,7 @@ add_project_arguments(
 
 cc = meson.get_compiler('c')
 sh = find_program('sh')
-xxd = find_program('xxd')
+xxd = find_program('xxd', required: false)
 
 dbus_dep = dependency('dbus-1')
 libcap_dep = dependency('libcap')
@@ -80,14 +80,19 @@ config_h = configure_file(
         configuration: config,
 )
 
-xml_introspection_h = configure_file(
-        input: 'org.freedesktop.RealtimeKit1.xml',
-        output: 'xml-introspection.h',
-        command: [
-                sh, '-c', '"$1" -i < "$2" > "$3"', sh,
-                xxd, '@INPUT@', '@OUTPUT@'
-        ],
-)
+if xxd.found()
+        xml_introspection_h = configure_file(
+                input: 'org.freedesktop.RealtimeKit1.xml',
+                output: 'xml-introspection.h',
+                command: [
+                        sh, '-c', '"$1" -i < "$2" > "$3"', sh,
+                        xxd, '@INPUT@', '@OUTPUT@'
+                ],
+        )
+else
+        warning('xxd not found, cannot compile introspection XML. Looking for existing one...')
+        xml_introspection_h = files('xml-introspection.h')
+endif
 
 executable(
         'rtkit-daemon',

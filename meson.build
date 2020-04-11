@@ -22,7 +22,7 @@ polkit_dep = dependency('polkit-gobject-1', required: false)
 systemd_dep = dependency('systemd', required: false)
 thread_dep = dependency('threads')
 
-librt_dep = cc.find_library('z')
+librt_dep = cc.find_library('rt')
 cc.check_header('sched.h', dependencies: librt_dep)
 cc.has_function('sched_setscheduler', dependencies: librt_dep)
 

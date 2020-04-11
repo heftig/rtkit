@@ -58,7 +58,7 @@ if policydir == ''
         policydir = get_option('datadir') / 'polkit-1' / 'actions'
 endif
 
-systemunitdir = ''
+systemunitdir = get_option('systemd_systemunitdir')
 if systemunitdir == '' and systemd_dep.found()
         systemunitdir = systemd_dep.get_pkgconfig_variable(
                 'systemdsystemunitdir',

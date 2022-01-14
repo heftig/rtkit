@@ -154,6 +154,9 @@ static bool canary_demote_unknown = FALSE;
 /* Log to stderr? */
 static bool log_stderr = FALSE;
 
+/* Suppress logging common status changes? */
+static bool log_quiet = FALSE;
+
 /* Scheduling policy to use */
 static int sched_policy = SCHED_RR;
 
@@ -766,11 +769,14 @@ static int process_set_realtime(struct rtkit_user *u, struct process *p, struct 
                 goto finish;
         }
 
-        syslog(LOG_INFO, "Successfully made thread %llu of process %llu owned by '%s' RT at priority %u.\n",
-               (unsigned long long) t->pid,
-               (unsigned long long) p->pid,
-               get_user_name(u->uid, user, sizeof(user)),
-               priority);
+        if (!log_quiet) {
+                syslog(LOG_INFO, "Successfully made thread %llu of process %llu owned by '%s' RT at priority %u.\n",
+                       (unsigned long long) t->pid,
+                       (unsigned long long) p->pid,
+                       get_user_name(u->uid, user, sizeof(user)),
+                       priority);
+        }
+
 
         r = 0;
 
@@ -829,11 +835,13 @@ static int process_set_high_priority(struct rtkit_user *u, struct process *p, st
                 goto finish;
         }
 
-        syslog(LOG_INFO, "Successfully made thread %llu of process %llu owned by '%s' high priority at nice level %i.\n",
-               (unsigned long long) t->pid,
-               (unsigned long long) p->pid,
-               get_user_name(u->uid, user, sizeof(user)),
-               priority);
+        if (!log_quiet) {
+                syslog(LOG_INFO, "Successfully made thread %llu of process %llu owned by '%s' high priority at nice level %i.\n",
+                        (unsigned long long) t->pid,
+                        (unsigned long long) p->pid,
+                        get_user_name(u->uid, user, sizeof(user)),
+                        priority);
+        }
 
         r = 0;
 
@@ -857,7 +865,7 @@ static void reset_known(void) {
                                 if (verify_process_user(u, p) >= 0 &&
                                     verify_process_starttime(p) >= 0 &&
                                     verify_thread_starttime(p, t) >= 0)
-                                        if (thread_reset(t->pid) >= 0) {
+                                        if (thread_reset(t->pid) >= 0 && !log_quiet) {
                                                 syslog(LOG_NOTICE, "Successfully demoted thread %llu of process %llu.\n",
                                                        (unsigned long long) t->pid,
                                                        (unsigned long long) p->pid);
@@ -951,7 +959,7 @@ static int reset_all(void) {
 
                         if (r == SCHED_FIFO || r == SCHED_RR ||
                             r == (SCHED_FIFO|SCHED_RESET_ON_FORK) || r == (SCHED_RR|SCHED_RESET_ON_FORK))
-                                if (thread_reset((pid_t) tid) >= 0) {
+                                if (thread_reset((pid_t) tid) >= 0 && !log_quiet) {
                                         syslog(LOG_NOTICE, "Successfully demoted thread %llu of process %llu.\n",
                                                (unsigned long long) tid,
                                                (unsigned long long) pid);
@@ -1432,10 +1440,12 @@ static DBusHandlerResult dbus_handler(DBusConnection *c, DBusMessage *m, void *u
         } else
                 return DBUS_HANDLER_RESULT_NOT_YET_HANDLED;
 
-        syslog(LOG_DEBUG, "Supervising %u threads of %u processes of %u users.\n",
-                n_total_threads,
-                n_total_processes,
-                n_users);
+        if (!log_quiet) {
+                syslog(LOG_DEBUG, "Supervising %u threads of %u processes of %u users.\n",
+                        n_total_threads,
+                        n_total_processes,
+                        n_users);
+        }
 
 #ifdef HAVE_LIBSYSTEMD
         sd_notifyf(0,
@@ -1875,6 +1885,7 @@ enum {
         ARG_CANARY_DEMOTE_ROOT,
         ARG_CANARY_DEMOTE_UNKNOWN,
         ARG_CANARY_REFUSE_SEC,
+        ARG_QUIET,
         ARG_STDERR,
         ARG_INTROSPECT
 };
@@ -1905,6 +1916,7 @@ static const struct option long_options[] = {
     { "canary-demote-unknown",       no_argument,       0, ARG_CANARY_DEMOTE_UNKNOWN },
     { "canary-refuse-sec",           required_argument, 0, ARG_CANARY_REFUSE_SEC },
     { "stderr",                      no_argument,       0, ARG_STDERR },
+    { "quiet",                       no_argument,       0, ARG_QUIET },
     { "introspect",                  no_argument,       0, ARG_INTROSPECT },
     { NULL, 0, 0, 0}
 };
@@ -1960,7 +1972,9 @@ static void show_help(const char *exe) {
                "      --no-canary                     Don't run a canary-based RT watchdog\n\n"
                "      --no-drop-privileges            Don't drop privileges\n"
                "      --no-chroot                     Don't chroot\n"
+               "      --quiet                         Don't log common status changes\n"
                "      --no-limit-resources            Don't limit daemon's resources\n",
+
                exe,
                username,
                sp_names[sched_policy],
@@ -2220,6 +2234,10 @@ static int parse_command_line(int argc, char *argv[], int *ret) {
 
                         case ARG_STDERR:
                                 log_stderr = TRUE;
+                                break;
+
+                        case ARG_QUIET:
+                                log_quiet = TRUE;
                                 break;
 
                         case ARG_INTROSPECT:

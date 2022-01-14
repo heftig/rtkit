@@ -768,13 +768,14 @@ static int process_set_realtime(struct rtkit_user *u, struct process *p, struct 
                 thread_reset(t->pid);
                 goto finish;
         }
-	if (!log_quiet) {
-		syslog(LOG_INFO, "Successfully made thread %llu of process %llu owned by '%s' RT at priority %u.\n",
-		       (unsigned long long) t->pid,
-		       (unsigned long long) p->pid,
-		       get_user_name(u->uid, user, sizeof(user)),
-		       priority);
-	}
+
+        if (!log_quiet) {
+                syslog(LOG_INFO, "Successfully made thread %llu of process %llu owned by '%s' RT at priority %u.\n",
+                       (unsigned long long) t->pid,
+                       (unsigned long long) p->pid,
+                       get_user_name(u->uid, user, sizeof(user)),
+                       priority);
+        }
 
 
         r = 0;
@@ -835,12 +836,12 @@ static int process_set_high_priority(struct rtkit_user *u, struct process *p, st
         }
 
         if (!log_quiet) {
-		syslog(LOG_INFO, "Successfully made thread %llu of process %llu owned by '%s' high priority at nice level %i.\n",
-		       (unsigned long long) t->pid,
-		       (unsigned long long) p->pid,
-		       get_user_name(u->uid, user, sizeof(user)),
-		       priority);
-	}
+                syslog(LOG_INFO, "Successfully made thread %llu of process %llu owned by '%s' high priority at nice level %i.\n",
+                        (unsigned long long) t->pid,
+                        (unsigned long long) p->pid,
+                        get_user_name(u->uid, user, sizeof(user)),
+                        priority);
+        }
 
         r = 0;
 
@@ -1440,11 +1441,11 @@ static DBusHandlerResult dbus_handler(DBusConnection *c, DBusMessage *m, void *u
                 return DBUS_HANDLER_RESULT_NOT_YET_HANDLED;
 
         if (!log_quiet) {
-		syslog(LOG_DEBUG, "Supervising %u threads of %u processes of %u users.\n",
-		        n_total_threads,
-		        n_total_processes,
-		        n_users);
-	}
+                syslog(LOG_DEBUG, "Supervising %u threads of %u processes of %u users.\n",
+                        n_total_threads,
+                        n_total_processes,
+                        n_users);
+        }
 
 #ifdef HAVE_LIBSYSTEMD
         sd_notifyf(0,
@@ -1971,8 +1972,9 @@ static void show_help(const char *exe) {
                "      --no-canary                     Don't run a canary-based RT watchdog\n\n"
                "      --no-drop-privileges            Don't drop privileges\n"
                "      --no-chroot                     Don't chroot\n"
-               "      --no-limit-resources            Don't limit daemon's resources\n"
-               "      --quiet                         Don't log common status changes\n",
+               "      --quiet                         Don't log common status changes\n"
+               "      --no-limit-resources            Don't limit daemon's resources\n",
+
                exe,
                username,
                sp_names[sched_policy],

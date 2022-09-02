@@ -145,6 +145,9 @@ static unsigned canary_watchdog_realtime_priority = 99;
 /* How long after the canary died shall we refuse further RT requests? */
 static unsigned canary_refusal_sec = 5*60;
 
+/* How long after resume do we ignore canary clock jumps? */
+static unsigned canary_resume_ignore_sec = 2;
+
 /* Demote root processes? */
 static bool canary_demote_root = FALSE;
 
@@ -195,7 +198,7 @@ static const char *proc = NULL;
 static int quit_fd = -1, canary_fd = -1;
 static pthread_t canary_thread_id = 0, watchdog_thread_id = 0;
 static volatile uint32_t refuse_until = 0;
-static volatile bool ignore_next_deadlock = false;
+static volatile uint32_t ignore_deadlock_until = 0;
 
 static const char *get_proc_path(void) {
         /* Useful for chroot environments */
@@ -1269,9 +1272,17 @@ static DBusHandlerResult dbus_sleep_handler(DBusConnection *c, DBusMessage *m, v
                 bool isSleep = false; // true=sleep, false=resume
                 if (dbus_message_get_args(m, &error, DBUS_TYPE_BOOLEAN, &isSleep, DBUS_TYPE_INVALID)) {
                         if (isSleep) {
-                                ignore_next_deadlock = true;
-                                __sync_synchronize();
+                                // Ignore deadlocks indefinitely; will fixup on first deadlock or resume
+                                ignore_deadlock_until = UINT32_MAX;
                         }
+                        else if (ignore_deadlock_until == UINT32_MAX)
+                        {
+                                struct timespec now; 
+                                assert_se(clock_gettime(CLOCK_MONOTONIC, &now) == 0);
+                                ignore_deadlock_until = (uint32_t) now.tv_sec + canary_resume_ignore_sec;
+
+                        }
+                        __sync_synchronize();
                 }
         }
         else
@@ -1502,16 +1513,18 @@ static int setup_dbus(DBusConnection **c) {
                 goto fail;
         }
 
-        dbus_bus_add_match(*c, "type='signal',interface='org.freedesktop.login1.Manager',member='PrepareForSleep'", &error);
-        if (dbus_error_is_set(&error))
-        {
-                syslog(LOG_ERR, "Failed to add signal on bus: %s\n", error.message);
-                abort();
-                goto fail;
-        }
-
         assert_se(dbus_connection_register_object_path(*c, RTKIT_OBJECT_PATH, &vtable, NULL));
-        assert_se(dbus_connection_add_filter(*c, dbus_sleep_handler, NULL, NULL));
+
+        if (canary_resume_ignore_sec)
+        {
+                dbus_bus_add_match(*c, "type='signal',interface='org.freedesktop.login0.Manager',member='PrepareForSleep'", &error);
+                if (dbus_error_is_set(&error))
+                {
+                        syslog(LOG_ERR, "Failed to add signal on bus: %s\n", error.message);
+                        goto fail;
+                }
+                assert_se(dbus_connection_add_filter(*c, dbus_sleep_handler, NULL, NULL));
+        }
 
         return 0;
 
@@ -1657,13 +1670,13 @@ static void* watchdog_thread(void *data) {
 
                 if (TIMESPEC_MSEC(last_cheep) + canary_watchdog_msec <= TIMESPEC_MSEC(now)) {
                         last_cheep = now;
-                        if (ignore_next_deadlock)
+                        if (now.tv_sec < (time_t) ignore_deadlock_until)
                         {
                                 // On sleep-resume, we get a spurious long time interval from when the system was sleeping.
                                 // This only can happen once per resume and real deadlocks that happen here will be detected
                                 // at the next watchdog interval.
                                 syslog(LOG_INFO, "The canary thread is apparently starving; ignoring once due to system resume.\n");
-                                ignore_next_deadlock = false;
+                                ignore_deadlock_until = 0;
                                 __sync_synchronize();
                         }
                         else
@@ -1923,6 +1936,7 @@ enum {
         ARG_CANARY_DEMOTE_ROOT,
         ARG_CANARY_DEMOTE_UNKNOWN,
         ARG_CANARY_REFUSE_SEC,
+        ARG_CANARY_RESUME_IGNORE_SEC,
         ARG_STDERR,
         ARG_INTROSPECT
 };
@@ -1952,6 +1966,7 @@ static const struct option long_options[] = {
     { "canary-demote-root",          no_argument,       0, ARG_CANARY_DEMOTE_ROOT },
     { "canary-demote-unknown",       no_argument,       0, ARG_CANARY_DEMOTE_UNKNOWN },
     { "canary-refuse-sec",           required_argument, 0, ARG_CANARY_REFUSE_SEC },
+    { "canary-resume-ignore-sec",    required_argument, 0, ARG_CANARY_RESUME_IGNORE_SEC },
     { "stderr",                      no_argument,       0, ARG_STDERR },
     { "introspect",                  no_argument,       0, ARG_INTROSPECT },
     { NULL, 0, 0, 0}
@@ -2263,6 +2278,20 @@ static int parse_command_line(int argc, char *argv[], int *ret) {
                                         return -1;
                                 }
                                 canary_refusal_sec = (uint32_t) u;
+                                break;
+                        }
+
+                        case ARG_CANARY_RESUME_IGNORE_SEC: {
+                                char *e = NULL;
+                                unsigned long u;
+
+                                errno = 0;
+                                u = strtoul(optarg, &e, 0);
+                                if (errno != 0 || !e || *e) {
+                                        fprintf(stderr, "--canary-resume-ignore-sec parameter invalid.\n");
+                                        return -1;
+                                }
+                                canary_resume_ignore_sec = (uint32_t) u;
                                 break;
                         }
 

@@ -195,6 +195,7 @@ static const char *proc = NULL;
 static int quit_fd = -1, canary_fd = -1;
 static pthread_t canary_thread_id = 0, watchdog_thread_id = 0;
 static volatile uint32_t refuse_until = 0;
+static volatile bool ignore_next_deadlock = false;
 
 static const char *get_proc_path(void) {
         /* Useful for chroot environments */
@@ -1256,6 +1257,32 @@ static int handle_dbus_prop_get(const char* property, DBusMessage *r) {
         return 0;
 }
 
+static DBusHandlerResult dbus_sleep_handler(DBusConnection *c, DBusMessage *m, void *userdata) {
+        (void)c;
+        (void)userdata;
+
+        DBusHandlerResult result = DBUS_HANDLER_RESULT_HANDLED;
+        DBusError error;
+        dbus_error_init(&error);
+
+        if (dbus_message_is_signal(m, "org.freedesktop.login1.Manager", "PrepareForSleep")) {
+                bool isSleep = false; // true=sleep, false=resume
+                if (dbus_message_get_args(m, &error, DBUS_TYPE_BOOLEAN, &isSleep, DBUS_TYPE_INVALID)) {
+                        if (isSleep) {
+                                ignore_next_deadlock = true;
+                                __sync_synchronize();
+                        }
+                }
+        }
+        else
+        {
+                result = DBUS_HANDLER_RESULT_NOT_YET_HANDLED;
+        }
+
+        dbus_error_free(&error);
+        return result;
+}
+
 static DBusHandlerResult dbus_handler(DBusConnection *c, DBusMessage *m, void *userdata) {
         DBusError error;
         DBusMessage *r = NULL;
@@ -1475,7 +1502,16 @@ static int setup_dbus(DBusConnection **c) {
                 goto fail;
         }
 
+        dbus_bus_add_match(*c, "type='signal',interface='org.freedesktop.login1.Manager',member='PrepareForSleep'", &error);
+        if (dbus_error_is_set(&error))
+        {
+                syslog(LOG_ERR, "Failed to add signal on bus: %s\n", error.message);
+                abort();
+                goto fail;
+        }
+
         assert_se(dbus_connection_register_object_path(*c, RTKIT_OBJECT_PATH, &vtable, NULL));
+        assert_se(dbus_connection_add_filter(*c, dbus_sleep_handler, NULL, NULL));
 
         return 0;
 
@@ -1621,14 +1657,26 @@ static void* watchdog_thread(void *data) {
 
                 if (TIMESPEC_MSEC(last_cheep) + canary_watchdog_msec <= TIMESPEC_MSEC(now)) {
                         last_cheep = now;
-                        syslog(LOG_WARNING, "The canary thread is apparently starving. Taking action.\n");
-                        refuse_until = (uint32_t) now.tv_sec + canary_refusal_sec;
-                        __sync_synchronize();
-
-                        if (canary_demote_unknown)
-                                reset_all();
+                        if (ignore_next_deadlock)
+                        {
+                                // On sleep-resume, we get a spurious long time interval from when the system was sleeping.
+                                // This only can happen once per resume and real deadlocks that happen here will be detected
+                                // at the next watchdog interval.
+                                syslog(LOG_INFO, "The canary thread is apparently starving; ignoring once due to system resume.\n");
+                                ignore_next_deadlock = false;
+                                __sync_synchronize();
+                        }
                         else
-                                reset_known();
+                        {
+                                syslog(LOG_WARNING, "The canary thread is apparently starving. Taking action.\n");
+                                refuse_until = (uint32_t) now.tv_sec + canary_refusal_sec;
+                                __sync_synchronize();
+
+                                if (canary_demote_unknown)
+                                        reset_all();
+                                else
+                                        reset_known();
+                        }
                         continue;
                 }
         }

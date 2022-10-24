@@ -15,6 +15,13 @@ cc = meson.get_compiler('c')
 sh = find_program('sh')
 xxd = find_program('xxd')
 
+all_warnings = [
+        '-Wno-unused-parameter',
+]
+
+supported_warnings = cc.get_supported_arguments(all_warnings)
+add_project_arguments(supported_warnings, language: 'c')
+
 dbus_dep = dependency('dbus-1')
 libcap_dep = dependency('libcap')
 libsystemd_dep = dependency('libsystemd', required: get_option('libsystemd'))

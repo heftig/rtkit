@@ -35,6 +35,10 @@
                        <arg name="property" direction="in" type="s"/>
                        <arg name="value" direction="out" type="v"/>
                 </method>
+                <method name="GetAll">
+                       <arg name="interface" direction="in" type="s"/>
+		       <arg name="props" direction="out" type="a{sv}"/>
+                </method>
         </interface>
         <interface name="org.freedesktop.DBus.Introspectable">
                 <method name="Introspect">

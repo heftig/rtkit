@@ -88,6 +88,10 @@ static const char introspect_xml[] = {
 
 #define TIMESPEC_MSEC(ts) (((int64_t) (ts).tv_sec * 1000LL) + ((int64_t) (ts).tv_nsec / 1000000LL))
 
+#ifndef ARRAY_SIZE
+#define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
+#endif
+
 /* If we actually execute a request we temporarily upgrade our realtime priority to this level */
 static unsigned our_realtime_priority = 21;
 
@@ -1256,6 +1260,70 @@ static int handle_dbus_prop_get(const char* property, DBusMessage *r) {
         return 0;
 }
 
+static int handle_dbus_prop_get_all(DBusMessage *r) {
+
+        DBusMessageIter iter, dict_iter;
+        struct {
+                const char *name;
+                int type;
+		const char *type_string;
+                void *value;
+        } props[] = {
+                {
+                        .name = "RTTimeUSecMax",
+                        .type = DBUS_TYPE_INT64,
+                        .type_string = DBUS_TYPE_INT64_AS_STRING,
+                        .value = &rttime_usec_max,
+                },
+                {
+                        .name = "MaxRealtimePriority",
+                        .type = DBUS_TYPE_INT32,
+                        .type_string = DBUS_TYPE_INT32_AS_STRING,
+                        .value = &max_realtime_priority,
+                },
+                {
+                        .name = "MinNiceLevel",
+                        .type = DBUS_TYPE_INT32,
+			.type_string = DBUS_TYPE_INT32_AS_STRING,
+                        .value = &min_nice_level,
+                }
+        };
+        size_t i;
+
+        dbus_message_iter_init_append(r, &iter);
+
+        assert_se(dbus_message_iter_open_container(&iter,
+                                                   DBUS_TYPE_ARRAY,
+                                                   DBUS_DICT_ENTRY_BEGIN_CHAR_AS_STRING
+                                                   DBUS_TYPE_STRING_AS_STRING
+                                                   DBUS_TYPE_VARIANT_AS_STRING
+                                                   DBUS_DICT_ENTRY_END_CHAR_AS_STRING,
+                                                   &dict_iter));
+
+        for (i = 0; i < ARRAY_SIZE(props); i++) {
+                DBusMessageIter dict_entry_iter, sub;
+
+                assert_se(dbus_message_iter_open_container(&dict_iter,
+                                                           DBUS_TYPE_DICT_ENTRY, NULL,
+                                                           &dict_entry_iter));
+                assert_se(dbus_message_iter_append_basic(&dict_entry_iter, DBUS_TYPE_STRING,
+                                                         &props[i].name));
+
+                assert_se(dbus_message_iter_open_container(&dict_entry_iter,
+							   DBUS_TYPE_VARIANT,
+							   props[i].type_string,
+							   &sub));
+                assert_se(dbus_message_iter_append_basic(&sub, props[i].type, props[i].value));
+                assert_se(dbus_message_iter_close_container(&dict_entry_iter, &sub));
+
+		assert_se(dbus_message_iter_close_container(&dict_iter, &dict_entry_iter));
+        }
+
+	assert_se(dbus_message_iter_close_container(&iter, &dict_iter));
+
+        return 0;
+}
+
 static DBusHandlerResult dbus_handler(DBusConnection *c, DBusMessage *m, void *userdata) {
         DBusError error;
         DBusMessage *r = NULL;
@@ -1414,6 +1482,29 @@ static DBusHandlerResult dbus_handler(DBusConnection *c, DBusMessage *m, void *u
                                           "Unknown property %s",
                                           property));
                         }
+                } else
+                        assert_se(r = dbus_message_new_error_printf(
+                                m,
+                                DBUS_ERROR_UNKNOWN_PROPERTY,
+                                "Unknown interface %s",
+                                interface));
+
+        } else if (dbus_message_is_method_call(m, "org.freedesktop.DBus.Properties", "GetAll")) {
+                const char *interface;
+
+                if (!dbus_message_get_args(m, &error,
+                                           DBUS_TYPE_STRING, &interface,
+                                           DBUS_TYPE_INVALID)) {
+
+                        syslog(LOG_DEBUG, "Failed to parse property get call: %s\n", error.message);
+                        assert_se(r = dbus_message_new_error(m, error.name, error.message));
+                        goto finish;
+                }
+
+                if (strcmp(interface, "org.freedesktop.RealtimeKit1") == 0) {
+                        assert_se(r = dbus_message_new_method_return(m));
+
+                        handle_dbus_prop_get_all(r);
                 } else
                         assert_se(r = dbus_message_new_error_printf(
                                 m,

@@ -2,7 +2,7 @@
 .\" First parameter, NAME, should be all caps
 .\" Second parameter, SECTION, should be 1-8, maybe w/ subsection
 .\" other parameters are allowed: see man(7), man(1)
-.TH RTKITCTL 8 "July 1, 2009"
+.TH RTKITCTL 8 "October 16, 2023"
 .\" Please adjust this date whenever revising the manpage.
 .\"
 .\" Some roff macros, for reference:
@@ -36,6 +36,12 @@ Reset real-time status of known threads.
 .TP
 .B \-\-reset\-all
 Reset real-time status of all threads.
+.TP
+.B \-\-suspend
+Temporarily reset real-time status of known threads.
+.TP
+.B \-\-resume
+Restore real-time status of known threads temporarily reset by suspend.
 .TP
 .B \-\-start
 Start RealtimeKit if it is not running already.

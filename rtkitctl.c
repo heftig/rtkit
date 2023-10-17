@@ -46,7 +46,9 @@ static void show_help(const char *exe) {
                "      --reset-known  Reset real-time status of known threads\n"
                "      --reset-all    Reset real-time status of all threads\n"
                "      --start        Start RealtimeKit if it is not running already\n"
-               "  -k, --exit         Terminate running RealtimeKit daemon\n",
+               "  -k, --exit         Terminate running RealtimeKit daemon\n"
+               "      --suspend      Suspend real-time status of known threads and reject new requests\n"
+               "      --resume       Resume real-time status of known threads and allow new requests\n",
                exe);
 }
 
@@ -58,6 +60,8 @@ int main (int argc, char*argv[]) {
                 ARG_EXIT,
                 ARG_RESET_KNOWN,
                 ARG_RESET_ALL,
+                ARG_SUSPEND,
+                ARG_RESUME,
         };
 
         static const struct option long_options[] = {
@@ -67,6 +71,8 @@ int main (int argc, char*argv[]) {
                 { "exit",        no_argument, 0, ARG_EXIT },
                 { "reset-known", no_argument, 0, ARG_RESET_KNOWN },
                 { "reset-all",   no_argument, 0, ARG_RESET_ALL },
+                { "suspend",     no_argument, 0, ARG_SUSPEND },
+                { "resume",      no_argument, 0, ARG_RESUME },
                 { NULL, 0, 0, 0}
         };
 
@@ -75,6 +81,8 @@ int main (int argc, char*argv[]) {
                 OPERATION_EXIT,
                 OPERATION_RESET_KNOWN,
                 OPERATION_RESET_ALL,
+                OPERATION_SUSPEND,
+                OPERATION_RESUME,
                 _OPERATION_MAX
         };
 
@@ -82,7 +90,9 @@ int main (int argc, char*argv[]) {
                 [OPERATION_START] = "StartServiceByName",
                 [OPERATION_EXIT] = "Exit",
                 [OPERATION_RESET_KNOWN] = "ResetKnown",
-                [OPERATION_RESET_ALL] = "ResetAll"
+                [OPERATION_RESET_ALL] = "ResetAll",
+                [OPERATION_SUSPEND] = "Suspend",
+                [OPERATION_RESUME] = "Resume"
         };
 
         DBusError error;
@@ -123,6 +133,14 @@ int main (int argc, char*argv[]) {
 
                         case ARG_RESET_ALL:
                                 operation = OPERATION_RESET_ALL;
+                                break;
+
+                        case ARG_SUSPEND:
+                                operation = OPERATION_SUSPEND;
+                                break;
+
+                        case ARG_RESUME:
+                                operation = OPERATION_RESUME;
                                 break;
 
                         case '?':

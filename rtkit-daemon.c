@@ -196,6 +196,9 @@ static int quit_fd = -1, canary_fd = -1;
 static pthread_t canary_thread_id = 0, watchdog_thread_id = 0;
 static volatile uint32_t refuse_until = 0;
 
+static int start_canary(void);
+static void stop_canary(void);
+
 static const char *get_proc_path(void) {
         /* Useful for chroot environments */
 
@@ -969,6 +972,14 @@ static int reset_all(void) {
         return 0;
 }
 
+static void suspend(void) {
+        // TODO
+}
+
+static void resume(void) {
+        // TODO
+}
+
 /* This mimics dbus_bus_get_unix_user() */
 static unsigned long get_unix_process_id(
                 DBusConnection *connection,
@@ -1379,6 +1390,16 @@ static DBusHandlerResult dbus_handler(DBusConnection *c, DBusMessage *m, void *u
 
                 reset_known();
                 user_gc();
+                assert_se(r = dbus_message_new_method_return(m));
+
+        } else if (dbus_message_is_method_call(m, "org.freedesktop.RealtimeKit1", "Suspend")) {
+
+                suspend();
+                assert_se(r = dbus_message_new_method_return(m));
+
+        } else if (dbus_message_is_method_call(m, "org.freedesktop.RealtimeKit1", "Resume")) {
+
+                resume();
                 assert_se(r = dbus_message_new_method_return(m));
 
         } else if (dbus_message_is_method_call(m, "org.freedesktop.RealtimeKit1", "Exit")) {

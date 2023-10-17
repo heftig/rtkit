@@ -24,6 +24,8 @@
                 </method>
                 <method name="ResetKnown"/>
                 <method name="ResetAll"/>
+                <method name="Suspend"/>
+                <method name="Resume"/>
                 <method name="Exit"/>
                 <property name="RTTimeUSecMax" type="x" access="read"/>
                 <property name="MaxRealtimePriority" type="i" access="read"/>

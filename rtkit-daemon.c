@@ -780,15 +780,15 @@ finish:
         return r;
 }
 
-static int process_set_high_priority(struct rtkit_user *u, struct process *p, struct thread *t, int priority) {
+static int process_set_high_priority(struct rtkit_user *u, struct process *p, struct thread *t, int nice_level) {
         int r;
         struct sched_param param;
         char user[64];
 
-        if (priority < PRIO_MIN || priority >= PRIO_MAX)
+        if (nice_level < PRIO_MIN || nice_level >= PRIO_MAX)
                 return -EINVAL;
 
-        if (priority < min_nice_level)
+        if (nice_level < min_nice_level)
                 return -EPERM;
 
         /* Make sure users don't flood us with requests */
@@ -815,9 +815,9 @@ static int process_set_high_priority(struct rtkit_user *u, struct process *p, st
                 goto finish;
         }
 
-        if (setpriority(PRIO_PROCESS, t->pid, priority) < 0) {
+        if (setpriority(PRIO_PROCESS, t->pid, nice_level) < 0) {
                 r = -errno;
-                syslog(LOG_ERR, "Failed to set nice level of process %llu to %i: %s\n", (unsigned long long) t->pid, priority, strerror(errno));
+                syslog(LOG_ERR, "Failed to set nice level of process %llu to %i: %s\n", (unsigned long long) t->pid, nice_level, strerror(errno));
                 goto finish;
         }
 
@@ -833,7 +833,7 @@ static int process_set_high_priority(struct rtkit_user *u, struct process *p, st
                (unsigned long long) t->pid,
                (unsigned long long) p->pid,
                get_user_name(u->uid, user, sizeof(user)),
-               priority);
+               nice_level);
 
         r = 0;
 
@@ -1321,7 +1321,7 @@ static DBusHandlerResult dbus_handler(DBusConnection *c, DBusMessage *m, void *u
                    || (is2 = dbus_message_is_method_call(m, "org.freedesktop.RealtimeKit1", "MakeThreadHighPriorityWithPID"))) {
 
                 uint64_t thread, process = (uint64_t) -1;
-                int32_t priority;
+                int32_t nice_level;
                 struct rtkit_user *u;
                 struct process *p;
                 struct thread *t;
@@ -1336,12 +1336,12 @@ static DBusHandlerResult dbus_handler(DBusConnection *c, DBusMessage *m, void *u
                         ret = dbus_message_get_args(m, &error,
                                                     DBUS_TYPE_UINT64, &process,
                                                     DBUS_TYPE_UINT64, &thread,
-                                                    DBUS_TYPE_INT32, &priority,
+                                                    DBUS_TYPE_INT32, &nice_level,
                                                     DBUS_TYPE_INVALID);
                 else
                         ret = dbus_message_get_args(m, &error,
                                                     DBUS_TYPE_UINT64, &thread,
-                                                    DBUS_TYPE_INT32, &priority,
+                                                    DBUS_TYPE_INT32, &nice_level,
                                                     DBUS_TYPE_INVALID);
 
                 if (!ret) {
@@ -1362,7 +1362,7 @@ static DBusHandlerResult dbus_handler(DBusConnection *c, DBusMessage *m, void *u
                         goto finish;
                 }
 
-                if ((ret = process_set_high_priority(u, p, t, priority))) {
+                if ((ret = process_set_high_priority(u, p, t, nice_level))) {
                         assert_se(r = dbus_message_new_error_printf(m, translate_error_forward(ret), "%s", strerror(-ret)));
                         goto finish;
                 }

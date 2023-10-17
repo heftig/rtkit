@@ -15,12 +15,12 @@
                 </method>
                 <method name="MakeThreadHighPriority">
                         <arg name="thread" type="t" direction="in"/>
-                        <arg name="priority" type="i" direction="in"/>
+                        <arg name="nice_level" type="i" direction="in"/>
                 </method>
                 <method name="MakeThreadHighPriorityWithPID">
                         <arg name="process" type="t" direction="in"/>
                         <arg name="thread" type="t" direction="in"/>
-                        <arg name="priority" type="i" direction="in"/>
+                        <arg name="nice_level" type="i" direction="in"/>
                 </method>
                 <method name="ResetKnown"/>
                 <method name="ResetAll"/>

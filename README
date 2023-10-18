@@ -80,17 +80,17 @@ CLIENTS:
         note that gettid() is not available in glibc, you need to
         implement that manually using syscall(). Consult the reference
         client implementation for details.)
-        
+
         It is possible to promote thread in process to realtime/high
         priority from another process, that will make the DBUS call,
         using:
-        
+
                 void MakeThreadRealtimeWithPID(u64 process, u64 thread_id, u32 priority);
 
                 void MakeThreadHighPriorityWithPID(u64 process, u64 thread_id, s32 priority);
 
         where process is the PID of the process that has thread thread_id.
-        
+
         A BSD-licensed reference implementation of the client is
         available in rtkit.[ch] as part of the package. You may copy
         this into your sources if you wish. However given how simple
@@ -227,3 +227,4 @@ REQUIREMENTS:
 
 OPTIONAL DEPENDENCIES:
         libsystemd - to let rtkit talk to systemd using the sd-daemon API
+        logind (runtime) - to gracefully handle system-suspend

@@ -160,6 +160,9 @@ static int sched_policy = SCHED_RR;
 /* Current suspend state */
 static bool suspended = FALSE;
 
+/* Logind sleep inhibitor pipefd */
+static int inhibit_sleep_fd = -1;
+
 struct thread {
         /* We use the thread id plus its starttime as a unique identifier for threads */
         pid_t pid;
@@ -1057,6 +1060,61 @@ static void resume(void) {
         suspended = FALSE;
 }
 
+static int logind_inhibit_sleep(DBusConnection *connection) {
+        DBusError error;
+        DBusMessage *m, *r;
+        const char *arg_what = "sleep";
+        const char *arg_who = "Realtime Kit";
+        const char *arg_why = "Demote realtime scheduling and stop canary.";
+        const char *arg_mode = "delay";
+        int fd = -1;
+
+        dbus_error_init(&error);
+
+        assert_se(m = dbus_message_new_method_call(
+                                "org.freedesktop.login1",
+                                "/org/freedesktop/login1",
+                                "org.freedesktop.login1.Manager",
+                                "Inhibit"));
+
+        assert_se(dbus_message_append_args(
+                                m,
+                                DBUS_TYPE_STRING, &arg_what,
+                                DBUS_TYPE_STRING, &arg_who,
+                                DBUS_TYPE_STRING, &arg_why,
+                                DBUS_TYPE_STRING, &arg_mode,
+                                DBUS_TYPE_INVALID));
+
+        r = dbus_connection_send_with_reply_and_block(connection, m, -1, &error);
+        dbus_message_unref(m);
+
+        if (!r)
+                goto finish;
+
+        if (dbus_set_error_from_message(&error, r)) {
+                syslog(LOG_NOTICE, "Could not setup logind system-suspend handling: %s", error.message);
+                goto finish;
+        }
+
+        if (!dbus_message_get_args(
+                        r, &error,
+                        DBUS_TYPE_UNIX_FD, &fd,
+                        DBUS_TYPE_INVALID)) {
+                syslog(LOG_DEBUG, "Failed to parse inhibit sleep reply: %s", error.message);
+                goto finish;
+        }
+
+        syslog(LOG_INFO, "Handling system-suspend using logind.\n");
+
+finish:
+        if (r)
+                dbus_message_unref(r);
+
+        dbus_error_free(&error);
+
+        return fd;
+}
+
 /* This mimics dbus_bus_get_unix_user() */
 static unsigned long get_unix_process_id(
                 DBusConnection *connection,
@@ -1554,6 +1612,57 @@ finish:
         dbus_error_free(&error);
 
         return DBUS_HANDLER_RESULT_HANDLED;
+}
+
+static DBusHandlerResult dbus_logind_handler(DBusConnection *c, DBusMessage *m, void *userdata) {
+        if (dbus_message_is_signal(m, "org.freedesktop.login1.Manager", "PrepareForSleep")) {
+                DBusError error;
+                bool active;
+
+                dbus_error_init(&error);
+                if (dbus_message_get_args(m, &error, DBUS_TYPE_BOOLEAN, &active, DBUS_TYPE_INVALID)) {
+                        if (active) {
+                                suspend();
+                                if (inhibit_sleep_fd >= 0) {
+                                        close(inhibit_sleep_fd);
+                                        inhibit_sleep_fd = -1;
+                                }
+                        } else {
+                                if (inhibit_sleep_fd < 0)
+                                        inhibit_sleep_fd = logind_inhibit_sleep(c);
+                                resume();
+                        }
+                } else
+                        syslog(LOG_DEBUG, "Failed to parse signal argument: %s\n", error.message);
+
+                dbus_error_free(&error);
+        } else
+                return DBUS_HANDLER_RESULT_NOT_YET_HANDLED;
+
+        return DBUS_HANDLER_RESULT_HANDLED;
+}
+
+static void setup_logind(DBusConnection *c) {
+        DBusError error;
+
+        inhibit_sleep_fd = logind_inhibit_sleep(c);
+        if (inhibit_sleep_fd < 0)
+                return;
+
+        dbus_error_init(&error);
+
+        dbus_bus_add_match(c, "type='signal',path='/org/freedesktop/login1',member='PrepareForSleep'", &error);
+        if (dbus_error_is_set(&error)) {
+                syslog(LOG_ERR, "Failed to add match for logind signals: %s\n", error.message);
+
+                close(inhibit_sleep_fd);
+                inhibit_sleep_fd = -1;
+
+                dbus_error_free(&error);
+                return;
+        }
+
+        assert_se(dbus_connection_add_filter(c, dbus_logind_handler, NULL, NULL));
 }
 
 static int setup_dbus(DBusConnection **c) {
@@ -2406,6 +2515,8 @@ int main(int argc, char *argv[]) {
 
         if (start_canary() < 0)
                 goto finish;
+
+        setup_logind(bus);
 
         umask(0777);
 

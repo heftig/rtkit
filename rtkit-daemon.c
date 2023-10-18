@@ -1101,10 +1101,7 @@ static int logind_inhibit_sleep(DBusConnection *connection) {
                         DBUS_TYPE_UNIX_FD, &fd,
                         DBUS_TYPE_INVALID)) {
                 syslog(LOG_DEBUG, "Failed to parse inhibit sleep reply: %s", error.message);
-                goto finish;
         }
-
-        syslog(LOG_INFO, "Handling system-suspend using logind.\n");
 
 finish:
         if (r)
@@ -1663,6 +1660,8 @@ static void setup_logind(DBusConnection *c) {
         }
 
         assert_se(dbus_connection_add_filter(c, dbus_logind_handler, NULL, NULL));
+
+        syslog(LOG_INFO, "Handling system-suspend using logind.\n");
 }
 
 static int setup_dbus(DBusConnection **c) {
